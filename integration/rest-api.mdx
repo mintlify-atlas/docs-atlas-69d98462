@@ -370,6 +370,49 @@ while IFS= read -r line; do
 done
 ```
 
+## Advanced REST API (v1/ddl)
+
+Proton also provides a structured REST API for DDL operations at `/proton/v1/ddl` and `/timeplusd/v1/ddl`.
+
+<Info>These endpoints are designed for programmatic stream management and are commonly used by the Timeplus Cloud platform.</Info>
+
+### List Streams
+
+```bash
+# List all streams
+curl http://localhost:8123/proton/v1/ddl/streams
+```
+
+### Get Stream Details
+
+```bash
+# Get specific stream info
+curl http://localhost:8123/proton/v1/ddl/streams/mydb/mystream
+```
+
+### Create Stream via v1/ddl
+
+```bash
+curl -X POST http://localhost:8123/proton/v1/ddl/streams \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "my_stream",
+    "columns": [
+      {"name": "id", "type": "int32"},
+      {"name": "value", "type": "string"}
+    ]
+  }'
+```
+
+### Ingest Data
+
+```bash
+# Ingest data to stream
+curl -X POST http://localhost:8123/proton/v1/ingest/streams/my_stream \
+  -H "Content-Type: application/json" \
+  -d '{"id": 1, "value": "test"}'
+```
+
 ## Health Check Endpoint
 
 ```bash
