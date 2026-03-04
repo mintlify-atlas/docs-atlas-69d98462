@@ -1,0 +1,160 @@
+---
+title: "What is Timeplus Proton"
+description: "Fast, lightweight stream processing engine powered by ClickHouse"
+---
+
+## Overview
+
+Timeplus Proton is the fastest SQL pipeline engine in a single C++ binary, for stream processing, analytics, observability and AI. It's a simple, fast and efficient alternative to ksqlDB and Apache Flink, powered by the ClickHouse engine.
+
+<Info>
+  Timeplus Proton is open source under Apache License 2.0, with no JVM, no ZooKeeper, and zero dependencies.
+</Info>
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Blazing Fast Performance" icon="bolt">
+    Written in C++ with SIMD optimizations. Delivers 90 million events per second with 4ms end-to-end latency on an M2 Max MacBook Pro.
+  </Card>
+  
+  <Card title="Lightweight & Efficient" icon="feather">
+    Single binary under 500MB. No JVM required. Runs on AWS t2.nano (1 vCPU, 0.5 GiB memory).
+  </Card>
+  
+  <Card title="SQL for Everything" icon="database">
+    Native sources/sinks for Kafka, ClickHouse, MySQL, Postgres, MongoDB, S3/Iceberg, OpenSearch. Streaming ingestion, multi-stream JOINs, materialized views, and UDFs in Python/JavaScript.
+  </Card>
+  
+  <Card title="Powered by ClickHouse" icon="rocket">
+    Extends ClickHouse with stream processing capabilities. Thousands of SQL functions available. Query billions of rows in milliseconds.
+  </Card>
+</CardGroup>
+
+## Why Choose Timeplus Proton
+
+### Alternative to Apache Flink and ksqlDB
+
+Timeplus Proton provides powerful stream processing functionalities including:
+
+- Streaming ETL pipelines
+- Tumble/hop/session windows
+- Watermarks and late event handling
+- Incremental materialized views
+- CDC and data revision processing
+- Queryable analytical and row-based materialized views
+
+### Performance Advantages
+
+<Tabs>
+  <Tab title="Speed">
+    Timeplus Proton is written in C++ with optimized performance through SIMD. 
+    
+    **Benchmark results** (Apple MacBook Pro M2 Max):
+    - **90 million** events per second throughput
+    - **4 millisecond** end-to-end latency
+    - **1 million** unique keys for high cardinality aggregation
+  </Tab>
+  
+  <Tab title="Resource Efficiency">
+    - Single binary deployment (< 500MB)
+    - No JVM overhead
+    - No ZooKeeper dependency
+    - Minimal memory footprint
+    - Can run on t2.nano instances
+  </Tab>
+  
+  <Tab title="Kafka Integration">
+    Best streaming SQL engine for Apache Kafka and Redpanda:
+    - Query live data in Kafka with external streams
+    - No data duplication required
+    - Process and transform on-the-fly
+    - Write results back to Kafka topics
+  </Tab>
+</Tabs>
+
+## Common Use Cases
+
+Timeplus Proton empowers you to build a wide range of real-time applications and data pipelines:
+
+### Real-time Analytics ETL/Pipeline
+
+Efficiently ingest live data from sources like Kafka, perform in-pipeline transformations (filtering, enrichment, masking), and route it to downstream systems including:
+- Data warehouses like ClickHouse
+- Other Kafka topics
+- Analytical stores
+- Time-series databases
+
+### Real-time Telemetry Pipeline and Alerting
+
+Process and route logs, metrics, and traces with:
+- In-pipeline noise reduction
+- Real-time alerts before forwarding
+- Integration with Splunk, Elastic, or S3
+- Custom transformation rules
+
+### Real-time Feature Pipeline for AI/ML
+
+Compute real-time features using:
+- Low-latency, high-throughput streaming SQL
+- Materialized views with backfill support
+- Advanced windowing over live data
+- Direct integration with ML platforms
+
+## Architecture Overview
+
+<img
+  className="block"
+  src="https://raw.githubusercontent.com/timeplus-io/proton/develop/design/timeplus-architecture-diagram-web.jpg"
+  alt="Timeplus Proton Architecture"
+/>
+
+### Data Storage
+
+Proton includes two complementary storage engines:
+
+1. **Streaming Store**: Optimized for append-only, high-throughput writes and streaming queries
+2. **Historical Store**: Based on ClickHouse, optimized for OLAP queries on historical data
+
+### Query Processing
+
+Timeplus Proton supports both:
+- **Streaming queries**: Continuous queries that process data as it arrives
+- **Historical queries**: Traditional batch queries on stored data
+- **Hybrid queries**: Combine streaming and historical data in a single query
+
+## Comparison with Other Solutions
+
+| Feature | Timeplus Proton | Apache Flink | ksqlDB |
+|---------|----------------|--------------|--------|
+| **Language** | C++ | Java | Java |
+| **Binary Size** | < 500MB | ~300MB+ | ~100MB+ |
+| **Dependencies** | None | JVM, ZooKeeper | JVM, Kafka |
+| **Deployment** | Single binary | Cluster required | Kafka dependent |
+| **SQL Support** | Full ANSI SQL + streaming extensions | Table API + SQL | Limited SQL |
+| **Performance** | 90M EPS | 10-20M EPS | 5-10M EPS |
+| **Memory** | Runs on 0.5GB | Requires 2GB+ | Requires 1GB+ |
+
+<Note>
+  Performance numbers are approximate and vary based on workload and hardware configuration.
+</Note>
+
+## What's Next
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get Timeplus Proton running in 5 minutes
+  </Card>
+  
+  <Card title="Installation" icon="download" href="/installation">
+    Detailed installation instructions for all platforms
+  </Card>
+  
+  <Card title="Examples" icon="code" href="https://github.com/timeplus-io/proton/tree/develop/examples">
+    Explore real-world examples and use cases
+  </Card>
+  
+  <Card title="SQL Reference" icon="book" href="https://docs.timeplus.com/proton">
+    Complete SQL reference documentation
+  </Card>
+</CardGroup>

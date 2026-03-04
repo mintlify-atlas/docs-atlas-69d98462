@@ -1,0 +1,460 @@
+---
+title: "Installation"
+description: "Install Timeplus Proton on your platform"
+---
+
+## Installation Methods
+
+Timeplus Proton can be installed using several methods depending on your platform and preferences.
+
+<CardGroup cols={2}>
+  <Card title="Single Binary" icon="file-binary">
+    Fastest way to get started - one command installation
+  </Card>
+  
+  <Card title="Docker" icon="docker">
+    Run Proton in a container with no system dependencies
+  </Card>
+  
+  <Card title="Homebrew" icon="apple">
+    Native macOS installation via Homebrew
+  </Card>
+  
+  <Card title="Build from Source" icon="code">
+    Compile Proton yourself for custom configurations
+  </Card>
+</CardGroup>
+
+## Single Binary Installation
+
+The easiest way to install Timeplus Proton:
+
+```bash
+curl https://install.timeplus.com/oss | sh
+```
+
+This script:
+1. Detects your operating system and architecture
+2. Downloads the appropriate Proton binary
+3. Installs it to your system
+4. Makes `proton` available in your PATH
+
+### Starting Proton
+
+Once installed, start the server:
+
+```bash
+proton server
+```
+
+<Info>
+  By default, Proton creates a `proton-data` folder in your current directory for configuration, logs, and data.
+</Info>
+
+In another terminal, connect with the client:
+
+```bash
+proton client
+```
+
+## Docker Installation
+
+Run Timeplus Proton in a Docker container:
+
+```bash
+docker run -d --pull always \
+  -p 8123:8123 \
+  -p 8463:8463 \
+  --name proton \
+  d.timeplus.com/timeplus-io/proton:latest
+```
+
+### Port Mapping
+
+- **8123**: HTTP interface (used by JDBC driver, batch mode by default)
+- **8463**: Native TCP protocol (used by native clients)
+
+<Warning>
+  Make sure these ports are available and not blocked by your firewall.
+</Warning>
+
+### Connecting to Docker Container
+
+Start the SQL client inside the container:
+
+```bash
+docker exec -it proton proton-client
+```
+
+Or connect from your host machine using the HTTP interface:
+
+```bash
+curl http://localhost:8123
+```
+
+### Persisting Data
+
+To persist data outside the container:
+
+```bash
+docker run -d --pull always \
+  -p 8123:8123 \
+  -p 8463:8463 \
+  -v $PWD/proton-data:/var/lib/proton \
+  --name proton \
+  d.timeplus.com/timeplus-io/proton:latest
+```
+
+## Docker Compose
+
+For a complete stack with Proton and Kafka/Redpanda:
+
+```yaml docker-compose.yml
+version: '3.8'
+
+volumes:
+  redpanda: null
+
+services:
+  proton:
+    image: d.timeplus.com/timeplus-io/proton:latest
+    pull_policy: always
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "8463:8463"  # Native TCP
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --smp 1
+      - --memory 1G
+      - --mode dev-container
+    ports:
+      - "19092:19092"
+    volumes:
+      - redpanda:/var/lib/redpanda/data
+```
+
+Start the stack:
+
+```bash
+docker compose up -d
+```
+
+<Tip>
+  Check out the [ecommerce example](https://github.com/timeplus-io/proton/tree/develop/examples/ecommerce) for a complete Docker Compose setup with sample data.
+</Tip>
+
+## Homebrew (macOS)
+
+For Mac users, install via Homebrew:
+
+```bash
+brew install timeplus-io/timeplus/proton
+```
+
+### Starting Proton
+
+```bash
+proton server
+```
+
+### Updating Proton
+
+```bash
+brew upgrade timeplus-io/timeplus/proton
+```
+
+### Uninstalling
+
+```bash
+brew uninstall proton
+```
+
+## Build from Source
+
+For developers who want to build Proton from source or contribute to the project.
+
+### Prerequisites
+
+Required tools:
+- **clang-19** or higher (clang++-19)
+- **cmake** 3.20 or higher
+- **ninja** build system
+- **git** with submodule support
+
+### Ubuntu/Debian (x86_64 or ARM64)
+
+<Steps>
+  <Step title="Install Dependencies">
+    ```bash
+    apt install git cmake ccache python3 ninja-build wget \
+      apt-transport-https apt-utils ca-certificates dnsutils \
+      gnupg iputils-ping lsb-release gpg curl software-properties-common
+    ```
+  </Step>
+
+  <Step title="Install LLVM 19">
+    ```bash
+    wget https://apt.llvm.org/llvm.sh
+    chmod +x llvm.sh
+    sudo ./llvm.sh 19
+    ```
+  </Step>
+
+  <Step title="Clone and Build">
+    ```bash
+    git clone --recurse-submodules git@github.com:timeplus-io/proton.git
+    cd proton
+    mkdir -p build && cd build
+    cmake ..
+    ninja
+    ```
+  </Step>
+
+  <Step title="Run Proton">
+    ```bash
+    # Start server
+    ./programs/proton server start
+    
+    # In another terminal, start client
+    ./programs/proton client
+    ```
+  </Step>
+</Steps>
+
+### macOS (Apple Silicon)
+
+<Steps>
+  <Step title="Verify Xcode Version">
+    Ensure you have Xcode 14.3.1 or any version newer than 15.1 Beta 1:
+    
+    ```bash
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild -version
+    ```
+    
+    Expected output:
+    ```
+    Xcode 14.3.1
+    Build version 14E300c
+    ```
+  </Step>
+
+  <Step title="Install Dependencies">
+    ```bash
+    brew update
+    brew install ccache cmake ninja libtool gettext llvm@19 gcc \
+      binutils grep findutils libiconv
+    ```
+  </Step>
+
+  <Step title="Set Environment Variables">
+    ```bash
+    export PATH=$(brew --prefix llvm@19)/bin:$PATH
+    export CC=$(brew --prefix llvm@19)/bin/clang
+    export CXX=$(brew --prefix llvm@19)/bin/clang++
+    ```
+  </Step>
+
+  <Step title="Clone and Build">
+    ```bash
+    git clone --recurse-submodules git@github.com:timeplus-io/proton.git
+    cd proton
+    mkdir -p build && cd build
+    cmake ..
+    ninja
+    ```
+  </Step>
+</Steps>
+
+### Build with Docker
+
+Build Proton using a Docker container (works on any platform):
+
+```bash
+./docker/packager/packager \
+  --package-type binary \
+  --docker-image-version clang-19 \
+  --proton-build \
+  --enable-proton-local \
+  --output-dir $(pwd)/build_output
+```
+
+The compiled binary will be in `build_output/`.
+
+### Optional Build Configuration
+
+#### Disable JavaScript (V8) Engine
+
+For smaller binaries or constrained builds:
+
+```bash
+cmake -DENABLE_V8=OFF ..
+ninja
+```
+
+<Note>
+  Disabling V8 will remove JavaScript UDF support.
+</Note>
+
+## System Requirements
+
+### Minimum Requirements
+
+- **CPU**: 1 vCPU (x86_64 or ARM64)
+- **Memory**: 512 MB RAM
+- **Disk**: 1 GB available space
+- **OS**: Linux, macOS, or Windows (WSL2)
+
+<Info>
+  Proton can run on an AWS t2.nano instance (1 vCPU, 0.5 GiB memory).
+</Info>
+
+### Recommended Requirements
+
+- **CPU**: 4+ vCPUs
+- **Memory**: 8+ GB RAM
+- **Disk**: 50+ GB SSD
+- **Network**: 1 Gbps network interface
+
+### Supported Platforms
+
+| Platform | Architecture | Status |
+|----------|--------------|--------|
+| Ubuntu 20.04+ | x86_64 | ✅ Fully Supported |
+| Ubuntu 20.04+ | ARM64 | ✅ Fully Supported |
+| Debian 11+ | x86_64 | ✅ Fully Supported |
+| Debian 11+ | ARM64 | ✅ Fully Supported |
+| macOS 12+ | x86_64 (Intel) | ✅ Fully Supported |
+| macOS 12+ | ARM64 (Apple Silicon) | ✅ Fully Supported |
+| RHEL 8+ | x86_64 | ✅ Fully Supported |
+| RHEL 8+ | ARM64 | ✅ Fully Supported |
+| Windows 10+ | WSL2 | ✅ Supported |
+
+## Verifying Installation
+
+After installation, verify Proton is working correctly:
+
+<Steps>
+  <Step title="Check Version">
+    ```bash
+    proton server --version
+    ```
+    
+    Should output version information.
+  </Step>
+
+  <Step title="Start Server">
+    ```bash
+    proton server start
+    ```
+    
+    Look for log messages indicating successful startup.
+  </Step>
+
+  <Step title="Connect Client">
+    ```bash
+    proton client
+    ```
+    
+    Should connect and show the `proton-client :)` prompt.
+  </Step>
+
+  <Step title="Run Test Query">
+    ```sql
+    SELECT 'Hello, Proton!' as message;
+    ```
+    
+    Should return:
+    ```
+    ┌─message─────────┐
+    │ Hello, Proton!  │
+    └─────────────────┘
+    ```
+  </Step>
+</Steps>
+
+## Network Ports
+
+Proton uses the following ports by default:
+
+| Port | Protocol | Purpose |
+|------|----------|----------|
+| 8123 | HTTP | HTTP interface, JDBC driver (batch mode) |
+| 8463 | TCP | Native protocol for clients |
+| 3218 | HTTP | HTTP streaming mode (optional) |
+
+<Warning>
+  Ensure these ports are not blocked by firewalls when connecting from external tools like DBeaver or Grafana.
+</Warning>
+
+For more details, see the [Server Ports documentation](https://docs.timeplus.com/proton-ports).
+
+## Troubleshooting
+
+### Port Already in Use
+
+If port 8123 or 8463 is already in use:
+
+```bash
+# Check what's using the port
+sudo lsof -i :8123
+
+# Kill the process or change Proton's port in config
+```
+
+### Permission Denied
+
+If you get permission errors:
+
+```bash
+# Ensure the proton-data directory is writable
+chmod -R 755 ./proton-data
+```
+
+### Docker Container Won't Start
+
+Check Docker logs:
+
+```bash
+docker logs proton
+```
+
+### Connection Refused
+
+Ensure:
+1. Proton server is running
+2. Firewall allows connections on port 8123/8463
+3. You're connecting to the correct host/port
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Get your first streaming query running
+  </Card>
+  
+  <Card title="Kafka Integration" icon="diagram-project" href="https://docs.timeplus.com/proton-kafka">
+    Connect to Apache Kafka or Redpanda
+  </Card>
+  
+  <Card title="SQL Reference" icon="book" href="https://docs.timeplus.com/proton">
+    Learn Proton's SQL syntax
+  </Card>
+  
+  <Card title="Examples" icon="code" href="https://github.com/timeplus-io/proton/tree/develop/examples">
+    Explore real-world use cases
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+If you encounter issues during installation:
+
+- **GitHub Issues**: [Report a bug](https://github.com/timeplus-io/proton/issues)
+- **Discussions**: [Ask questions](https://github.com/timeplus-io/proton/discussions)
+- **Slack**: [Join the community](https://timeplus.com/slack)
+- **Documentation**: [Full docs](https://docs.timeplus.com/proton)

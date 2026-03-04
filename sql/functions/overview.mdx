@@ -1,0 +1,173 @@
+---
+title: Functions Overview
+description: Overview of SQL functions available in Timeplus Proton
+---
+
+Timeplus Proton provides a comprehensive set of SQL functions for stream processing, data transformation, and analysis. With over 600 built-in functions inherited from ClickHouse, plus streaming-specific functions, Proton offers powerful capabilities for real-time data processing.
+
+## Function Categories
+
+### Aggregate Functions
+Aggregate functions perform calculations across multiple rows and return a single result. In streaming contexts, these functions support continuous aggregation over windows.
+
+- **Basic aggregates**: `count()`, `sum()`, `avg()`, `min()`, `max()`
+- **Statistical**: `stddev()`, `variance()`, `corr()`, `covar()`
+- **Advanced**: `quantile()`, `median()`, `any()`, `group_array()`
+- **Specialized**: `arg_min()`, `arg_max()`, `uniq()`, `top_k()`
+
+See [Aggregation Functions](/sql/functions/aggregation) for details.
+
+### Window Functions
+Window functions enable time-based windowing operations essential for stream processing.
+
+- **Tumbling windows**: `tumble(stream, interval)`
+- **Hopping windows**: `hop(stream, slide, size)`
+- **Session windows**: `session(stream, timeout)`
+- **Window metadata**: `window_start`, `window_end`
+
+See [Window Functions](/sql/functions/window) for details.
+
+### Date and Time Functions
+Functions for working with timestamps, dates, and time zones.
+
+- **Current time**: `now()`, `today()`, `now64()`
+- **Extraction**: `to_year()`, `to_month()`, `to_day_of_month()`, `to_hour()`, `to_minute()`, `to_second()`
+- **Conversion**: `to_date()`, `to_datetime()`, `to_unix_timestamp()`
+- **Arithmetic**: `add_years()`, `add_months()`, `subtract_days()`
+- **Formatting**: `format_datetime()`, `parse_datetime()`
+- **Time zones**: Support for timezone-aware operations
+
+See [Time Functions](/sql/functions/time) for details.
+
+### String Functions
+Functions for string manipulation and pattern matching.
+
+- **Manipulation**: `concat()`, `substring()`, `upper()`, `lower()`, `trim()`
+- **Pattern matching**: `like`, `match()`, `extract()`
+- **Conversion**: `to_string()`, `cast()`
+- **Encoding**: `base64_encode()`, `base64_decode()`, `url_encode()`
+
+### Array Functions
+Functions for working with array data types.
+
+- **Construction**: `array()`, `range()`, `array_concat()`
+- **Access**: `array_element()`, `array_slice()`
+- **Transformation**: `array_map()`, `array_filter()`, `array_reduce()`
+- **Aggregation**: `array_sum()`, `array_avg()`, `array_count()`
+
+### Mathematical Functions
+Standard mathematical operations and functions.
+
+- **Arithmetic**: `plus`, `minus`, `multiply`, `divide`, `modulo`
+- **Rounding**: `round()`, `floor()`, `ceil()`, `trunc()`
+- **Exponential**: `exp()`, `log()`, `ln()`, `pow()`, `sqrt()`
+- **Trigonometric**: `sin()`, `cos()`, `tan()`, `asin()`, `acos()`, `atan()`
+
+### Conditional Functions
+Functions for conditional logic and branching.
+
+- **Conditional**: `if()`, `multiIf()`, `case`
+- **Null handling**: `ifNull()`, `coalesce()`, `nullIf()`
+- **Type checking**: `isNull()`, `isNotNull()`
+
+### Type Conversion
+Functions for converting between data types.
+
+- **Casting**: `CAST(x AS type)`, `cast_or_default()`
+- **Conversion**: `to_int8()`, `to_float64()`, `to_string()`
+
+## ClickHouse Function Compatibility
+
+Timeplus Proton is built on ClickHouse and maintains compatibility with most ClickHouse functions. This means:
+
+- **Extensive function library**: Access to 600+ ClickHouse functions
+- **Familiar syntax**: If you know ClickHouse SQL, you know Proton
+- **Documentation reference**: ClickHouse function documentation generally applies
+- **Performance**: Optimized C++ implementations with SIMD acceleration
+
+### Streaming-Specific Enhancements
+
+While maintaining ClickHouse compatibility, Proton adds streaming-specific capabilities:
+
+- **Window functions**: Native support for tumble, hop, and session windows
+- **Streaming aggregation**: Incremental computation with state management
+- **Event time processing**: Functions aware of event timestamps and watermarks
+- **Stateful operations**: Aggregations maintain state across streaming data
+
+## User-Defined Functions (UDF)
+
+Timeplus Proton supports custom functions in Python and JavaScript, enabling you to extend the built-in function library with your own logic.
+
+### Python UDF
+
+Create custom functions using Python:
+
+```sql
+CREATE FUNCTION my_function(x INT) RETURNS INT
+LANGUAGE PYTHON AS $$
+def my_function(x):
+    return x * 2
+$$;
+```
+
+### JavaScript UDF
+
+Create custom functions using JavaScript:
+
+```sql
+CREATE FUNCTION my_js_function(x INT) RETURNS INT
+LANGUAGE JAVASCRIPT AS $$
+function my_js_function(x) {
+    return x * 2;
+}
+$$;
+```
+
+### UDF Use Cases
+
+- **Custom business logic**: Implement domain-specific calculations
+- **External API calls**: Integrate with external services (with caution in streaming)
+- **Complex transformations**: Data enrichment and validation
+- **Machine learning**: Apply custom ML models to streaming data
+
+## Function Properties
+
+### Deterministic vs Non-Deterministic
+
+- **Deterministic**: Always return the same result for the same input (e.g., `abs()`, `upper()`)
+- **Non-deterministic**: May return different results (e.g., `now()`, `rand()`)
+
+### Null Handling
+
+Most functions handle NULL values according to SQL standards:
+- Arithmetic operations with NULL return NULL
+- Use `ifNull()` or `coalesce()` to provide defaults
+- Some aggregates like `count()` have special NULL behavior
+
+### Case Sensitivity
+
+Function names in Proton are case-insensitive:
+- `COUNT()`, `count()`, and `Count()` are equivalent
+- Improves compatibility with different SQL dialects
+
+## Performance Considerations
+
+### SIMD Optimization
+
+Many functions use SIMD (Single Instruction, Multiple Data) for vectorized execution:
+- Processes multiple values simultaneously
+- Significant performance improvements for numeric operations
+- Automatic when supported by hardware
+
+### Streaming Context
+
+In streaming queries, consider:
+- **State size**: Aggregations maintain state; use appropriate windows
+- **Computation cost**: Complex UDFs may impact latency
+- **Memory usage**: Large intermediate results can affect performance
+
+## Next Steps
+
+- [Aggregation Functions](/sql/functions/aggregation) - Learn about streaming aggregation
+- [Window Functions](/sql/functions/window) - Master time-based windowing
+- [Time Functions](/sql/functions/time) - Work with timestamps and dates

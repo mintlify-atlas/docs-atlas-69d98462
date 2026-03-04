@@ -1,80 +1,283 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: "Quick Start"
+description: "Get started with Timeplus Proton in under 5 minutes"
 ---
 
-## Get started in three steps
+## Get Started in Seconds
 
-Get your documentation site running locally and make your first customization.
+The fastest way to get Timeplus Proton running:
 
-### Step 1: Set up your local environment
+```bash
+curl https://install.timeplus.com/oss | sh
+```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+This installs the `proton` binary on your system. No JVM, no dependencies, just a single executable.
+
+## Quick Start Guide
+
+Follow these steps to get your first streaming query running:
+
+<Steps>
+  <Step title="Install Proton">
+    Choose your preferred installation method:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    <Tabs>
+      <Tab title="Single Binary (Recommended)">
+        ```bash
+        curl https://install.timeplus.com/oss | sh
+        ```
+        
+        This downloads and installs the latest Proton binary to your system.
+      </Tab>
+      
+      <Tab title="Homebrew (macOS)">
+        ```bash
+        brew install timeplus-io/timeplus/proton
+        ```
+      </Tab>
+      
+      <Tab title="Docker">
+        ```bash
+        docker run -d --pull always \
+          -p 8123:8123 -p 8463:8463 \
+          --name proton \
+          d.timeplus.com/timeplus-io/proton:latest
+        ```
+      </Tab>
+    </Tabs>
+  </Step>
+
+  <Step title="Start the Server">
+    Once installed, start the Proton server:
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    ```bash
+    proton server
+    ```
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    <Info>
+      By default, Proton stores config, logs, and data in `./proton-data` in your current directory.
+    </Info>
+    
+    The server will start and listen on:
+    - **Port 8123**: HTTP interface (default for JDBC)
+    - **Port 8463**: Native TCP protocol
+  </Step>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+  <Step title="Connect with SQL Client">
+    Open a new terminal window and start the SQL client:
+    
+    ```bash
+    proton client
+    ```
+    
+    You should see a prompt like:
+    ```
+    proton-client :)
+    ```
+  </Step>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <Step title="Create Your First Stream">
+    Let's create a stream with random data to test the system:
+    
+    ```sql
+    CREATE RANDOM STREAM devices(
+      device string default 'device'||to_string(rand()%4),
+      temperature float default rand()%1000/10
+    );
+    ```
+    
+    This creates a stream that continuously generates random device temperature readings.
+  </Step>
 
-### Step 3: Go live
+  <Step title="Run Your First Query">
+    Now let's query the streaming data:
+    
+    ```sql
+    SELECT device, count(*), min(temperature), max(temperature)
+    FROM devices 
+    GROUP BY device;
+    ```
+    
+    You should see live results updating continuously:
+    
+    ```
+    ┌─device──┬─count()─┬─min(temperature)─┬─max(temperature)─┐
+    │ device0 │    2256 │                0 │             99.6 │
+    │ device1 │    2260 │              0.1 │             99.7 │
+    │ device3 │    2259 │              0.3 │             99.9 │
+    │ device2 │    2225 │              0.2 │             99.8 │
+    └─────────┴─────────┴──────────────────┴──────────────────┘
+    ```
+    
+    <Tip>
+      Press `Ctrl+C` to stop the streaming query.
+    </Tip>
+  </Step>
+</Steps>
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+## Working with Kafka
 
-## Next steps
+One of Proton's most powerful features is native Kafka integration. Here's a quick example:
 
-Now that you have your docs running, explore these key features:
+### Read from Kafka
 
-<CardGroup cols={2}>
+```sql
+CREATE EXTERNAL STREAM frontend_events(raw string)
+SETTINGS 
+  type='kafka',
+  brokers='localhost:9092',
+  topic='my-events';
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
+-- Query live data from Kafka
+SELECT * FROM frontend_events;
+```
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
+### Write to Kafka
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
-</CardGroup>
+```sql
+-- Create a materialized view that processes and writes to Kafka
+CREATE MATERIALIZED VIEW enriched_events_mv
+INTO EXTERNAL STREAM output_stream
+AS
+SELECT 
+  raw:userId as user_id,
+  raw:eventType as event_type,
+  raw:timestamp as event_time
+FROM frontend_events
+WHERE raw:eventType != 'heartbeat';
+```
 
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+  For a complete Kafka example with Docker Compose, check out the [ecommerce example](https://github.com/timeplus-io/proton/tree/develop/examples/ecommerce).
 </Note>
+
+## Real-World Example: AWS MSK to ClickHouse
+
+Here's a more advanced example showing how to build a streaming ETL pipeline:
+
+```sql
+-- Read from AWS MSK using IAM Role
+CREATE EXTERNAL STREAM aws_msk_stream (
+  device string,
+  temperature float
+)
+SETTINGS
+  type='kafka',
+  brokers='prefix.kafka.us-west-2.amazonaws.com:9098',
+  topic='sensor-data',
+  security_protocol='SASL_SSL',
+  sasl_mechanism='AWS_MSK_IAM';
+
+-- Write to ClickHouse
+CREATE EXTERNAL TABLE ch_target
+SETTINGS 
+  type='clickhouse',
+  address='clickhouse.example.com:9000',
+  user='default',
+  password='***',
+  table='device_metrics';
+
+-- Create a long-running materialized view for aggregation
+CREATE MATERIALIZED VIEW mv_msk_to_ch 
+INTO ch_target 
+AS
+SELECT 
+  window_start as timestamp, 
+  device, 
+  avg(temperature) as avg_temperature,
+  min(temperature) as min_temperature,
+  max(temperature) as max_temperature
+FROM tumble(aws_msk_stream, 10s) 
+GROUP BY window_start, device;
+```
+
+This creates a real-time pipeline that:
+1. Reads from AWS MSK
+2. Aggregates data in 10-second tumbling windows
+3. Writes aggregated results to ClickHouse
+
+## Try the Docker Compose Stack
+
+For a complete environment with Proton, Redpanda (Kafka), and sample data:
+
+```bash
+cd examples/ecommerce
+docker compose up
+```
+
+This starts:
+- Timeplus Proton
+- Redpanda (Kafka-compatible)
+- Redpanda Console (Web UI)
+- Owl Shop (data generator)
+
+Once running, connect to the Proton container:
+
+```bash
+docker exec -it proton-demo-ecommerce-proton-1 proton-client
+```
+
+Then create an external stream and start querying:
+
+```sql
+-- Create external stream to read from Kafka
+CREATE EXTERNAL STREAM frontend_events(raw string)
+SETTINGS 
+  type='kafka',
+  brokers='redpanda:9092',
+  topic='owlshop-frontend-events';
+
+-- Filter events by JSON attributes
+SELECT 
+  _tp_time, 
+  raw:ipAddress, 
+  raw:requestedUrl 
+FROM frontend_events 
+WHERE raw:method='POST';
+
+-- Show a live ASCII bar chart
+SELECT 
+  raw:method, 
+  count() as cnt, 
+  bar(cnt, 0, 40, 5) as bar 
+FROM frontend_events
+GROUP BY raw:method 
+ORDER BY cnt DESC 
+LIMIT 5 BY emit_version();
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Detailed installation instructions for all platforms
+  </Card>
+  
+  <Card title="Stream Processing" icon="water" href="https://docs.timeplus.com/proton">
+    Learn about streams, windows, and materialized views
+  </Card>
+  
+  <Card title="Kafka Integration" icon="rocket" href="https://docs.timeplus.com/proton-kafka">
+    Deep dive into Kafka external streams
+  </Card>
+  
+  <Card title="Examples" icon="code" href="https://github.com/timeplus-io/proton/tree/develop/examples">
+    Explore more real-world examples
+  </Card>
+</CardGroup>
+
+## Getting Help
+
+<CardGroup cols={3}>
+  <Card title="Documentation" icon="book" href="https://docs.timeplus.com/proton">
+    Complete documentation
+  </Card>
+  
+  <Card title="GitHub Discussions" icon="comments" href="https://github.com/timeplus-io/proton/discussions">
+    Ask questions and share feedback
+  </Card>
+  
+  <Card title="Slack Community" icon="slack" href="https://timeplus.com/slack">
+    Connect with the community
+  </Card>
+</CardGroup>

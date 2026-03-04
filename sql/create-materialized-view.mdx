@@ -1,0 +1,331 @@
+---
+title: CREATE MATERIALIZED VIEW
+description: Create materialized views for continuous query processing
+---
+
+CREATE MATERIALIZED VIEW creates a materialized view that continuously processes streaming data and maintains results. Materialized views in Timeplus Proton are incremental and update automatically as new data arrives.
+
+## Syntax
+
+```sql
+CREATE [SCHEDULED] MATERIALIZED VIEW [IF NOT EXISTS] view_name
+[INTO [INNER UUID 'uuid'] | [db.]target_stream]
+[(
+    column_name1 type1,
+    column_name2 type2,
+    ...
+)]
+AS SELECT ...
+[STORAGE_SETTINGS setting1=value1, ...]
+[TTL expr]
+[COMMENT 'comment'];
+```
+
+## Parameters
+
+<ParamField path="view_name" type="identifier" required>
+  The name of the materialized view to create.
+</ParamField>
+
+<ParamField path="IF NOT EXISTS" type="boolean">
+  If specified, the statement will not raise an error if the view already exists.
+</ParamField>
+
+<ParamField path="SCHEDULED" type="boolean">
+  Creates a scheduled materialized view that runs periodically instead of continuously. Requires an explicit target stream via INTO clause.
+</ParamField>
+
+<ParamField path="INTO" type="stream_identifier">
+  Target stream where results will be written. If not specified, an internal stream is created automatically.
+</ParamField>
+
+<ParamField path="INNER UUID" type="string">
+  Specify the UUID for the internal target stream.
+</ParamField>
+
+<ParamField path="AS SELECT" type="query" required>
+  The SELECT query that defines the materialized view logic. Can include JOINs, aggregations, and window functions.
+</ParamField>
+
+## Storage Settings
+
+<ParamField path="STORAGE_SETTINGS" type="settings_clause">
+  Settings for the internal storage stream (if INTO is not specified).
+  Common settings:
+  - `shards` - Number of shards for distributed processing
+  - `replicas` - Number of replicas for high availability
+  - `logstore_retention_bytes` - Maximum log store size
+  - `logstore_retention_ms` - Maximum log store age
+</ParamField>
+
+<ParamField path="TTL" type="expression">
+  Time-to-live expression for the internal storage stream.
+  Example: `TTL _tp_time + INTERVAL 7 DAY`
+</ParamField>
+
+## Examples
+
+### Simple Aggregation Materialized View
+
+Create a materialized view that continuously aggregates device data:
+
+```sql
+CREATE MATERIALIZED VIEW device_metrics AS
+SELECT
+    device,
+    count(*) AS event_count,
+    avg(temperature) AS avg_temp,
+    min(temperature) AS min_temp,
+    max(temperature) AS max_temp
+FROM devices
+GROUP BY device;
+```
+
+### Materialized View with Target Stream
+
+Create a materialized view that writes to a specific target stream:
+
+```sql
+-- First create the target stream
+CREATE STREAM user_activity_summary (
+    user_id int64,
+    event_count uint64,
+    last_seen datetime64(3)
+);
+
+-- Create materialized view that writes to it
+CREATE MATERIALIZED VIEW mv_user_activity INTO user_activity_summary AS
+SELECT
+    user_id,
+    count(*) AS event_count,
+    max(_tp_time) AS last_seen
+FROM user_events
+GROUP BY user_id;
+```
+
+### Tumbling Window Materialized View
+
+Create a materialized view with tumbling windows:
+
+```sql
+CREATE MATERIALIZED VIEW metrics_1min AS
+SELECT
+    window_start,
+    window_end,
+    device,
+    avg(temperature) AS avg_temperature,
+    count(*) AS event_count
+FROM tumble(devices, 1m)
+GROUP BY window_start, window_end, device;
+```
+
+### Hopping Window Materialized View
+
+Create a materialized view with hopping windows:
+
+```sql
+CREATE MATERIALIZED VIEW metrics_5min_1min_hop AS
+SELECT
+    window_start,
+    window_end,
+    device,
+    avg(temperature) AS avg_temperature
+FROM hop(devices, 1m, 5m)
+GROUP BY window_start, window_end, device;
+```
+
+### Kafka to ClickHouse ETL
+
+Create a materialized view that reads from Kafka and writes to ClickHouse:
+
+```sql
+-- Create external stream for Kafka
+CREATE EXTERNAL STREAM aws_msk_stream (
+    device string,
+    temperature float
+)
+SETTINGS
+    type='kafka',
+    brokers='broker.kafka.us-west-2.amazonaws.com:9098',
+    topic='iot-data',
+    security_protocol='SASL_SSL',
+    sasl_mechanism='AWS_MSK_IAM';
+
+-- Create external table for ClickHouse
+CREATE EXTERNAL TABLE ch_aiven
+SETTINGS
+    type='clickhouse',
+    address='abc.aivencloud.com:28851',
+    user='avnadmin',
+    password='password',
+    secure=true,
+    table='events';
+
+-- Create materialized view for ETL pipeline
+CREATE MATERIALIZED VIEW mv_msk2ch INTO ch_aiven AS
+SELECT
+    window_start AS timestamp,
+    device,
+    avg(temperature) AS avg_temperature
+FROM tumble(aws_msk_stream, 10s)
+GROUP BY window_start, device;
+```
+
+### CDC Processing with Materialized Views
+
+Process Debezium CDC events into a changelog stream:
+
+```sql
+-- External stream for CDC events
+CREATE EXTERNAL STREAM customers_cdc (
+    raw string
+)
+SETTINGS
+    type='kafka',
+    brokers='redpanda:9092',
+    topic='dbserver1.inventory.customers';
+
+-- Target changelog stream
+CREATE STREAM customers (
+    id int,
+    first_name string,
+    last_name string,
+    email string
+)
+PRIMARY KEY id
+SETTINGS mode='changelog_kv', version_column='_tp_time';
+
+-- Materialized view for INSERT operations
+CREATE MATERIALIZED VIEW mv_customers_c INTO customers AS
+SELECT
+    to_time(raw:payload.ts_ms) AS _tp_time,
+    raw:payload.after.id::int AS id,
+    raw:payload.after.first_name AS first_name,
+    raw:payload.after.last_name AS last_name,
+    raw:payload.after.email AS email,
+    1::int8 AS _tp_delta
+FROM customers_cdc
+WHERE raw:payload.op = 'c'
+SETTINGS seek_to='earliest';
+
+-- Materialized view for UPDATE operations
+CREATE MATERIALIZED VIEW mv_customers_u INTO customers AS
+WITH cdc_changes AS (
+    SELECT
+        ts_ms,
+        array_join(changes) AS change,
+        change.1 AS val,
+        change.2 AS _tp_delta
+    FROM (
+        SELECT
+            to_time(raw:payload.ts_ms) AS ts_ms,
+            raw:payload.before AS before,
+            raw:payload.after AS after,
+            [(before, -1::int8), (after, 1::int8)] AS changes
+        FROM customers_cdc
+        WHERE raw:payload.op = 'u'
+        SETTINGS seek_to='earliest'
+    )
+)
+SELECT
+    ts_ms AS _tp_time,
+    val:id::int32 AS id,
+    val:first_name AS first_name,
+    val:last_name AS last_name,
+    val:email AS email,
+    _tp_delta
+FROM cdc_changes;
+
+-- Materialized view for DELETE operations
+CREATE MATERIALIZED VIEW mv_customers_d INTO customers AS
+SELECT
+    to_time(raw:payload.ts_ms) AS _tp_time,
+    raw:payload.before.id::int AS id,
+    raw:payload.before.first_name AS first_name,
+    raw:payload.before.last_name AS last_name,
+    raw:payload.before.email AS email,
+    -1::int8 AS _tp_delta
+FROM customers_cdc
+WHERE raw:payload.op = 'd'
+SETTINGS seek_to='earliest';
+```
+
+### Materialized View with Storage Settings
+
+Create a materialized view with custom storage settings:
+
+```sql
+CREATE MATERIALIZED VIEW high_value_transactions AS
+SELECT
+    user_id,
+    sum(amount) AS total_amount,
+    count(*) AS transaction_count
+FROM transactions
+WHERE amount > 1000
+GROUP BY user_id
+STORAGE_SETTINGS shards=4, logstore_retention_ms=604800000;
+```
+
+### Scheduled Materialized View
+
+Create a scheduled materialized view that runs periodically:
+
+```sql
+-- Create target stream
+CREATE STREAM daily_summary (
+    date date,
+    total_events uint64,
+    unique_users uint64
+);
+
+-- Create scheduled materialized view
+CREATE SCHEDULED MATERIALIZED VIEW mv_daily INTO daily_summary AS
+SELECT
+    to_date(_tp_time) AS date,
+    count(*) AS total_events,
+    count(DISTINCT user_id) AS unique_users
+FROM user_events
+GROUP BY date;
+```
+
+## Materialized View Types
+
+### Streaming Materialized Views
+
+Default type. Continuously processes data as it arrives:
+- Updates incrementally
+- Low latency
+- Always up-to-date
+
+### Scheduled Materialized Views
+
+Runs periodically on a schedule:
+- Requires explicit target stream (INTO clause)
+- Good for batch processing
+- Reduces resource usage for periodic updates
+
+## Best Practices
+
+1. **Use explicit target streams** when you need to query results or when multiple materialized views write to the same stream
+
+2. **Set appropriate retention** using STORAGE_SETTINGS to manage storage costs
+
+3. **Use window functions** for time-based aggregations to get consistent results
+
+4. **Consider changelog streams** when you need to track updates and deletes
+
+5. **Monitor resource usage** for complex joins and aggregations
+
+## Notes
+
+- Materialized views start processing immediately upon creation
+- For external streams, use `SETTINGS seek_to='earliest'` to process existing data
+- Materialized views cannot be directly queried; query their target stream instead
+- Drop a materialized view with `DROP VIEW view_name`
+
+## See Also
+
+- [CREATE STREAM](/sql/create-stream) - Create target streams
+- [CREATE EXTERNAL STREAM](/sql/create-external-stream) - Create source external streams
+- [SELECT](/sql/select) - Query syntax for materialized view definitions
+- [Window Functions](/sql/functions/window) - Tumbling, hopping, and session windows

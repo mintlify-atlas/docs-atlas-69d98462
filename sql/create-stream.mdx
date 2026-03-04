@@ -1,0 +1,244 @@
+---
+title: CREATE STREAM
+description: Create a stream in Timeplus Proton
+---
+
+CREATE STREAM creates a new stream in Timeplus Proton. Streams are append-only data structures optimized for real-time data ingestion and querying.
+
+## Syntax
+
+```sql
+CREATE [OR REPLACE] [TEMPORARY] STREAM [IF NOT EXISTS] [db.]stream_name
+(
+    column_name1 type1 [DEFAULT expr1] [CODEC(codec1)],
+    column_name2 type2 [DEFAULT expr2] [CODEC(codec2)],
+    ...
+    [INDEX index_name1 expr1 TYPE type1 GRANULARITY value1],
+    [CONSTRAINT constraint_name1 CHECK expr]
+)
+[ENGINE = engine_name]
+[PARTITION BY expr]
+[PRIMARY KEY expr]
+[ORDER BY expr]
+[SAMPLE BY expr]
+[TTL expr]
+[SETTINGS name1=value1, name2=value2, ...]
+[COMMENT 'comment']
+```
+
+## Parameters
+
+<ParamField path="stream_name" type="identifier" required>
+  The name of the stream to create. Can be qualified with database name as `db.stream_name`.
+</ParamField>
+
+<ParamField path="IF NOT EXISTS" type="boolean">
+  If specified, the statement will not raise an error if the stream already exists.
+</ParamField>
+
+<ParamField path="TEMPORARY" type="boolean">
+  If specified, creates a temporary stream that exists only for the duration of the session.
+</ParamField>
+
+<ParamField path="column_name" type="identifier" required>
+  The name of the column.
+</ParamField>
+
+<ParamField path="type" type="data_type" required>
+  The data type of the column. Supported types include: int8, int16, int32, int64, uint8, uint16, uint32, uint64, float32, float64, string, datetime, datetime64, date, bool, array, map, tuple, and more.
+</ParamField>
+
+<ParamField path="DEFAULT" type="expression">
+  Default value expression for the column. Can reference other columns or use functions.
+</ParamField>
+
+<ParamField path="CODEC" type="codec_name">
+  Compression codec for the column. Examples: CODEC(ZSTD), CODEC(LZ4), CODEC(Delta, ZSTD).
+</ParamField>
+
+<ParamField path="INDEX" type="index_definition">
+  Secondary index definition with syntax: `INDEX name expr TYPE type GRANULARITY value`
+</ParamField>
+
+<ParamField path="CONSTRAINT" type="constraint_definition">
+  Check constraint with syntax: `CONSTRAINT name CHECK expr`
+</ParamField>
+
+## Engine
+
+<ParamField path="ENGINE" type="engine_name">
+  The storage engine to use. Default is `Stream()`. Other engines include `VersionedKV()` for changelog streams.
+</ParamField>
+
+## Clauses
+
+<ParamField path="PARTITION BY" type="expression">
+  Expression to determine how data is partitioned. Common pattern: `PARTITION BY to_YYYYMM(_tp_time)`
+</ParamField>
+
+<ParamField path="PRIMARY KEY" type="expression">
+  Primary key expression. Used for data organization and query optimization.
+</ParamField>
+
+<ParamField path="ORDER BY" type="expression">
+  Expression defining the sort order within partitions. If not specified, defaults to PRIMARY KEY.
+</ParamField>
+
+<ParamField path="SAMPLE BY" type="expression">
+  Expression for sampling. Typically uses a hash function on the primary key.
+</ParamField>
+
+<ParamField path="TTL" type="expression">
+  Time-to-live expression. Defines when data should be automatically deleted.
+  Syntax: `TTL _tp_time + INTERVAL 30 DAY`
+</ParamField>
+
+## Settings
+
+<ParamField path="mode" type="string">
+  Stream mode. Options:
+  - `append` (default): Append-only stream
+  - `changelog_kv`: Changelog stream with primary key for updates/deletes
+  - `versioned_kv`: Versioned key-value stream
+</ParamField>
+
+<ParamField path="version_column" type="string">
+  Column name for versioning in changelog/versioned streams. Usually `_tp_time`.
+</ParamField>
+
+<ParamField path="logstore_retention_bytes" type="integer">
+  Maximum size in bytes for the log store before old data is deleted.
+</ParamField>
+
+<ParamField path="logstore_retention_ms" type="integer">
+  Maximum age in milliseconds for data in the log store before deletion.
+</ParamField>
+
+## Examples
+
+### Basic Stream
+
+Create a simple stream with basic columns:
+
+```sql
+CREATE STREAM user_events (
+    user_id int64,
+    event_type string,
+    timestamp datetime64(3)
+);
+```
+
+### Stream with Default Values
+
+Create a stream with default expressions:
+
+```sql
+CREATE STREAM devices (
+    device_id string DEFAULT 'device' || to_string(rand() % 10),
+    temperature float32 DEFAULT rand() % 100,
+    timestamp datetime64(3) DEFAULT now64(3)
+);
+```
+
+### Stream with Primary Key
+
+Create a changelog stream with primary key:
+
+```sql
+CREATE STREAM customers (
+    id int,
+    first_name string,
+    last_name string,
+    email string
+)
+PRIMARY KEY id
+SETTINGS mode='changelog_kv', version_column='_tp_time';
+```
+
+### Stream with TTL
+
+Create a stream that automatically deletes data older than 30 days:
+
+```sql
+CREATE STREAM metrics (
+    metric_name string,
+    value float64,
+    timestamp datetime
+)
+TTL timestamp + INTERVAL 30 DAY;
+```
+
+### Stream with Partitioning
+
+Create a stream partitioned by month:
+
+```sql
+CREATE STREAM events (
+    event_id string,
+    user_id int64,
+    event_time datetime
+)
+PARTITION BY to_YYYYMM(event_time)
+ORDER BY (user_id, event_time);
+```
+
+## CREATE RANDOM STREAM
+
+CREATE RANDOM STREAM is a special variant that generates random data continuously. Useful for testing and development.
+
+### Syntax
+
+```sql
+CREATE RANDOM STREAM [IF NOT EXISTS] stream_name (
+    column_name1 type1 [DEFAULT expr1],
+    column_name2 type2 [DEFAULT expr2],
+    ...
+)
+[SETTINGS eps=rate];
+```
+
+### Parameters
+
+<ParamField path="eps" type="integer">
+  Events per second to generate. Default is unlimited (generates as fast as possible).
+</ParamField>
+
+### Examples
+
+#### Random Stream with Default Expressions
+
+```sql
+CREATE RANDOM STREAM devices (
+    device string DEFAULT 'device' || to_string(rand() % 4),
+    temperature float DEFAULT rand() % 1000 / 10
+);
+```
+
+#### Querying Random Stream
+
+```sql
+-- Create random stream
+CREATE RANDOM STREAM devices (
+    device string DEFAULT 'device' || to_string(rand() % 4),
+    temperature float DEFAULT rand() % 1000 / 10
+);
+
+-- Query with aggregation
+SELECT device, count(*), min(temperature), max(temperature)
+FROM devices
+GROUP BY device;
+```
+
+## Notes
+
+- The `_tp_time` column is automatically added to all streams and contains the event time (ingestion time by default)
+- Streams are append-only by default. For update/delete support, use `mode='changelog_kv'`
+- For versioned streams, specify `version_column` in SETTINGS
+- The default engine is `Stream()` which provides high-performance streaming storage
+
+## See Also
+
+- [CREATE EXTERNAL STREAM](/sql/create-external-stream) - Connect to external data sources
+- [CREATE MATERIALIZED VIEW](/sql/create-materialized-view) - Create materialized views
+- [INSERT](/sql/insert) - Insert data into streams
+- [SELECT](/sql/select) - Query streams

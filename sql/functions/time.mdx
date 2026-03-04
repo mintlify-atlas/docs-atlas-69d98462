@@ -1,0 +1,833 @@
+---
+title: Date and Time Functions
+description: Functions for working with dates, times, and timestamps in Timeplus Proton
+---
+
+Timeplus Proton provides comprehensive date and time functions for timestamp manipulation, timezone handling, and temporal calculations. These functions are essential for stream processing where event time is a critical dimension.
+
+## Current Time Functions
+
+### now()
+
+Returns the current timestamp as of query start.
+
+**Syntax:**
+```sql
+now([timezone])
+```
+
+**Return Type:** `DateTime`
+
+**Examples:**
+```sql
+-- Current timestamp in system timezone
+SELECT now();
+-- Result: 2024-03-04 15:30:45
+
+-- Current timestamp in specific timezone
+SELECT now('America/New_York');
+-- Result: 2024-03-04 10:30:45
+
+-- Use in queries
+SELECT event_id, event_time, now() - event_time as seconds_ago
+FROM events;
+```
+
+**Properties:**
+- Constant within a single query execution
+- All rows in a query see the same `now()` value
+- Non-deterministic across query executions
+- Evaluated once at query start, not per row
+
+**Implementation:** `src/Functions/now.cpp`
+
+### now64()
+
+Returns the current timestamp with sub-second precision.
+
+**Syntax:**
+```sql
+now64([precision], [timezone])
+```
+
+**Parameters:**
+- `precision`: Number of decimal places (3=milliseconds, 6=microseconds, 9=nanoseconds)
+- `timezone`: Optional timezone string
+
+**Return Type:** `DateTime64`
+
+**Examples:**
+```sql
+-- Millisecond precision
+SELECT now64(3);
+-- Result: 2024-03-04 15:30:45.123
+
+-- Microsecond precision
+SELECT now64(6);
+-- Result: 2024-03-04 15:30:45.123456
+
+-- Nanosecond precision with timezone
+SELECT now64(9, 'UTC');
+-- Result: 2024-03-04 20:30:45.123456789
+```
+
+**Use Cases:**
+- High-precision event timestamps
+- Performance measurement
+- Fine-grained time calculations
+
+**Implementation:** `src/Functions/now64.cpp`
+
+### today()
+
+Returns the current date (without time component).
+
+**Syntax:**
+```sql
+today()
+```
+
+**Return Type:** `Date`
+
+**Examples:**
+```sql
+-- Current date
+SELECT today();
+-- Result: 2024-03-04
+
+-- Events from today
+SELECT * FROM events 
+WHERE to_date(event_time) = today();
+
+-- Days since event
+SELECT event_id, today() - to_date(event_time) as days_ago
+FROM events;
+```
+
+**Properties:**
+- Returns date in system timezone
+- Constant within query execution
+- Useful for date comparisons
+
+**Implementation:** `src/Functions/today.cpp`
+
+## Date/Time Extraction
+
+### to_year()
+
+Extracts the year from a date or timestamp.
+
+**Syntax:**
+```sql
+to_year(date_or_datetime)
+year(date_or_datetime)  -- Alias for MySQL compatibility
+```
+
+**Return Type:** `UInt16`
+
+**Examples:**
+```sql
+SELECT to_year(now());
+-- Result: 2024
+
+SELECT event_id, to_year(event_time) as event_year
+FROM events;
+
+-- Group by year
+SELECT to_year(event_time) as year, count()
+FROM events
+GROUP BY year;
+```
+
+**Implementation:** `src/Functions/toYear.cpp`
+
+### to_month()
+
+Extracts the month (1-12) from a date or timestamp.
+
+**Syntax:**
+```sql
+to_month(date_or_datetime)
+```
+
+**Return Type:** `UInt8`
+
+**Examples:**
+```sql
+SELECT to_month(now());
+-- Result: 3 (March)
+
+-- Monthly aggregation
+SELECT to_year(event_time) as year, to_month(event_time) as month, count()
+FROM events
+GROUP BY year, month;
+```
+
+### to_day_of_month()
+
+Extracts the day of the month (1-31).
+
+**Syntax:**
+```sql
+to_day_of_month(date_or_datetime)
+```
+
+**Return Type:** `UInt8`
+
+**Examples:**
+```sql
+SELECT to_day_of_month(now());
+-- Result: 4
+```
+
+### to_day_of_week()
+
+Returns the day of the week (1=Monday, 7=Sunday).
+
+**Syntax:**
+```sql
+to_day_of_week(date_or_datetime)
+```
+
+**Return Type:** `UInt8`
+
+**Examples:**
+```sql
+SELECT to_day_of_week(now());
+-- Result: 1 (Monday)
+
+-- Weekend vs weekday analysis
+SELECT 
+    if(to_day_of_week(event_time) IN (6,7), 'weekend', 'weekday') as day_type,
+    count()
+FROM events
+GROUP BY day_type;
+```
+
+### to_hour() / to_minute() / to_second()
+
+Extract time components.
+
+**Syntax:**
+```sql
+to_hour(datetime)    -- 0-23
+to_minute(datetime)  -- 0-59
+to_second(datetime)  -- 0-59
+```
+
+**Return Type:** `UInt8`
+
+**Examples:**
+```sql
+SELECT 
+    to_hour(now()) as hour,
+    to_minute(now()) as minute,
+    to_second(now()) as second;
+-- Result: 15, 30, 45
+
+-- Hourly distribution
+SELECT to_hour(event_time) as hour, count()
+FROM events
+GROUP BY hour
+ORDER BY hour;
+```
+
+### to_iso_year()
+
+Returns the ISO year number (ISO 8601 week-numbering year).
+
+**Syntax:**
+```sql
+to_iso_year(date_or_datetime)
+```
+
+**Examples:**
+```sql
+-- For 2024-01-01 (Monday of ISO week)
+SELECT to_iso_year('2024-01-01');
+-- Result: 2024
+
+-- For 2023-01-01 (Sunday, belongs to 2022-W52)
+SELECT to_iso_year('2023-01-01');
+-- Result: 2022
+```
+
+## Date/Time Conversion
+
+### to_date()
+
+Converts a value to Date type.
+
+**Syntax:**
+```sql
+to_date(value)
+```
+
+**Examples:**
+```sql
+-- From DateTime
+SELECT to_date(now());
+-- Result: 2024-03-04
+
+-- From string
+SELECT to_date('2024-03-04');
+-- Result: 2024-03-04
+
+-- From timestamp
+SELECT to_date(1709568645);
+-- Result: 2024-03-04
+```
+
+### to_datetime()
+
+Converts a value to DateTime type.
+
+**Syntax:**
+```sql
+to_datetime(value, [timezone])
+```
+
+**Examples:**
+```sql
+-- From string
+SELECT to_datetime('2024-03-04 15:30:45');
+
+-- From Unix timestamp
+SELECT to_datetime(1709568645);
+
+-- With timezone
+SELECT to_datetime('2024-03-04 15:30:45', 'America/New_York');
+```
+
+### to_unix_timestamp()
+
+Converts DateTime to Unix timestamp (seconds since 1970-01-01).
+
+**Syntax:**
+```sql
+to_unix_timestamp(datetime, [timezone])
+```
+
+**Return Type:** `UInt32`
+
+**Examples:**
+```sql
+SELECT to_unix_timestamp(now());
+-- Result: 1709568645
+
+-- From string with timezone
+SELECT to_unix_timestamp('2024-03-04 15:30:45', 'UTC');
+-- Result: 1709568645
+```
+
+### from_unix_timestamp()
+
+Converts Unix timestamp to DateTime.
+
+**Syntax:**
+```sql
+from_unix_timestamp(timestamp, [timezone])
+```
+
+**Examples:**
+```sql
+SELECT from_unix_timestamp(1709568645);
+-- Result: 2024-03-04 15:30:45
+
+SELECT from_unix_timestamp(1709568645, 'Asia/Tokyo');
+-- Result: 2024-03-05 00:30:45
+```
+
+### from_unix_timestamp64_*()
+
+Convert Unix timestamps with sub-second precision.
+
+**Variants:**
+- `from_unix_timestamp64_milli(value)` - Milliseconds
+- `from_unix_timestamp64_micro(value)` - Microseconds  
+- `from_unix_timestamp64_nano(value)` - Nanoseconds
+
+**Examples:**
+```sql
+SELECT from_unix_timestamp64_milli(1709568645123);
+-- Result: 2024-03-04 15:30:45.123
+
+SELECT from_unix_timestamp64_micro(1709568645123456);
+-- Result: 2024-03-04 15:30:45.123456
+```
+
+**Implementation:** `src/Functions/fromUnixTimestamp64*.cpp`
+
+## Date/Time Arithmetic
+
+### add_years() / add_months() / add_days()
+
+Add time intervals to dates or timestamps.
+
+**Syntax:**
+```sql
+add_years(date, n)
+add_months(date, n)
+add_days(date, n)
+add_hours(datetime, n)
+add_minutes(datetime, n)
+add_seconds(datetime, n)
+```
+
+**Examples:**
+```sql
+-- Add 1 year
+SELECT add_years(today(), 1);
+-- Result: 2025-03-04
+
+-- Add 3 months
+SELECT add_months(now(), 3);
+-- Result: 2024-06-04 15:30:45
+
+-- Subtract by using negative values
+SELECT add_days(today(), -7);
+-- Result: 2024-02-26 (7 days ago)
+
+-- Calculate expiration date
+SELECT 
+    user_id,
+    subscription_start,
+    add_months(subscription_start, 12) as subscription_end
+FROM subscriptions;
+```
+
+**Implementation:** `src/Functions/addYears.cpp`, `addMonths.cpp`, etc.
+
+### subtract_years() / subtract_months() / subtract_days()
+
+Subtract time intervals.
+
+**Syntax:**
+```sql
+subtract_years(date, n)
+subtract_months(date, n)
+subtract_days(date, n)
+```
+
+**Examples:**
+```sql
+SELECT subtract_years(today(), 1);
+-- Result: 2023-03-04
+
+SELECT subtract_days(now(), 30);
+-- Result: 2024-02-03 15:30:45
+```
+
+### date_diff()
+
+Calculate the difference between two dates in specified units.
+
+**Syntax:**
+```sql
+date_diff(unit, start_date, end_date)
+```
+
+**Units:** `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, `second`
+
+**Examples:**
+```sql
+-- Days between dates
+SELECT date_diff('day', '2024-01-01', '2024-03-04');
+-- Result: 63
+
+-- Hours since event
+SELECT 
+    event_id,
+    date_diff('hour', event_time, now()) as hours_ago
+FROM events;
+
+-- Subscription length in months
+SELECT 
+    user_id,
+    date_diff('month', start_date, end_date) as months_subscribed
+FROM subscriptions;
+```
+
+**Implementation:** `src/Functions/dateDiff.cpp`
+
+## Date/Time Rounding
+
+### to_start_of_year()
+
+Round down to the start of the year.
+
+**Syntax:**
+```sql
+to_start_of_year(date_or_datetime)
+```
+
+**Examples:**
+```sql
+SELECT to_start_of_year(now());
+-- Result: 2024-01-01 00:00:00
+```
+
+### to_start_of_month()
+
+Round down to the start of the month.
+
+**Syntax:**
+```sql
+to_start_of_month(date_or_datetime)
+```
+
+**Examples:**
+```sql
+SELECT to_start_of_month(now());
+-- Result: 2024-03-01 00:00:00
+
+-- Monthly aggregation
+SELECT 
+    to_start_of_month(event_time) as month,
+    count()
+FROM events
+GROUP BY month;
+```
+
+### to_start_of_iso_year()
+
+Round down to the start of the ISO year (first Monday of the year).
+
+**Syntax:**
+```sql
+to_start_of_iso_year(date_or_datetime)
+```
+
+### to_last_day_of_month()
+
+Get the last day of the month.
+
+**Syntax:**
+```sql
+to_last_day_of_month(date_or_datetime)
+```
+
+**Examples:**
+```sql
+SELECT to_last_day_of_month('2024-02-15');
+-- Result: 2024-02-29 (leap year)
+
+SELECT to_last_day_of_month('2024-03-15');
+-- Result: 2024-03-31
+```
+
+### date_trunc()
+
+Truncate date/time to specified precision.
+
+**Syntax:**
+```sql
+date_trunc(unit, datetime, [timezone])
+```
+
+**Units:** `year`, `quarter`, `month`, `week`, `day`, `hour`, `minute`, `second`
+
+**Examples:**
+```sql
+-- Truncate to hour
+SELECT date_trunc('hour', now());
+-- Result: 2024-03-04 15:00:00
+
+-- Truncate to day
+SELECT date_trunc('day', now());
+-- Result: 2024-03-04 00:00:00
+
+-- Hourly aggregation
+SELECT 
+    date_trunc('hour', event_time) as hour,
+    count()
+FROM events
+GROUP BY hour;
+```
+
+**Implementation:** `src/Functions/date_trunc.cpp`
+
+## Date/Time Formatting
+
+### format_datetime()
+
+Format a DateTime value as a string.
+
+**Syntax:**
+```sql
+format_datetime(datetime, format, [timezone])
+```
+
+**Format specifiers:**
+- `%Y` - Year (4 digits)
+- `%m` - Month (01-12)
+- `%d` - Day (01-31)
+- `%H` - Hour (00-23)
+- `%i` - Minute (00-59)
+- `%s` - Second (00-59)
+- `%w` - Day of week (0=Sunday)
+- `%W` - Weekday name
+
+**Examples:**
+```sql
+SELECT format_datetime(now(), '%Y-%m-%d %H:%i:%s');
+-- Result: '2024-03-04 15:30:45'
+
+SELECT format_datetime(now(), '%Y/%m/%d');
+-- Result: '2024/03/04'
+
+SELECT format_datetime(now(), '%W, %M %d, %Y');
+-- Result: 'Monday, March 04, 2024'
+
+-- Use in queries
+SELECT 
+    event_id,
+    format_datetime(event_time, '%Y-%m-%d %H:%i') as formatted_time
+FROM events;
+```
+
+**Implementation:** `src/Functions/formatDateTime.cpp`
+
+### parse_datetime()
+
+Parse a string to DateTime.
+
+**Syntax:**
+```sql
+parse_datetime(string, format, [timezone])
+```
+
+**Examples:**
+```sql
+SELECT parse_datetime('2024-03-04 15:30:45', '%Y-%m-%d %H:%i:%s');
+-- Result: 2024-03-04 15:30:45
+
+SELECT parse_datetime('04/03/2024', '%d/%m/%Y');
+-- Result: 2024-03-04 00:00:00
+```
+
+**Implementation:** `src/Functions/parseDateTime.cpp`
+
+## Timezone Functions
+
+### timezone_of()
+
+Returns the timezone of a DateTime value.
+
+**Syntax:**
+```sql
+timezone_of(datetime)
+```
+
+**Examples:**
+```sql
+SELECT timezone_of(now());
+-- Result: 'UTC' or system timezone
+
+SELECT timezone_of(to_datetime('2024-03-04 15:30:45', 'America/New_York'));
+-- Result: 'America/New_York'
+```
+
+**Implementation:** `src/Functions/timezoneOf.cpp`
+
+### to_timezone()
+
+Convert DateTime to a different timezone.
+
+**Syntax:**
+```sql
+to_timezone(datetime, timezone)
+```
+
+**Examples:**
+```sql
+-- Convert UTC to New York time
+SELECT to_timezone(now(), 'America/New_York');
+
+-- Convert between timezones
+SELECT 
+    event_time as utc_time,
+    to_timezone(event_time, 'America/Los_Angeles') as la_time,
+    to_timezone(event_time, 'Asia/Tokyo') as tokyo_time
+FROM events;
+```
+
+## Time Intervals in Streaming
+
+### Interval Arithmetic
+
+Work with INTERVAL expressions:
+
+```sql
+-- Add interval to timestamp
+SELECT now() + INTERVAL 5 MINUTE;
+-- Result: 2024-03-04 15:35:45
+
+-- Subtract interval
+SELECT now() - INTERVAL 1 HOUR;
+-- Result: 2024-03-04 14:30:45
+
+-- Filter recent events
+SELECT * FROM events
+WHERE event_time > now() - INTERVAL 1 HOUR;
+```
+
+### Window Intervals
+
+Use in window functions:
+
+```sql
+-- 5-minute tumbling windows
+SELECT window_start, count()
+FROM tumble(events, INTERVAL 5 MINUTE)
+GROUP BY window_start;
+
+-- 1-hour hopping window, 15-minute slide
+SELECT window_start, avg(value)
+FROM hop(sensor_data, INTERVAL 15 MINUTE, INTERVAL 1 HOUR)
+GROUP BY window_start;
+```
+
+## Special Time Functions
+
+### time_slot()
+
+Round time down to the start of a time slot.
+
+**Syntax:**
+```sql
+time_slot(datetime, duration_seconds)
+```
+
+**Examples:**
+```sql
+-- 5-minute time slots
+SELECT time_slot(now(), 300);
+-- Result: 2024-03-04 15:30:00 (rounded to 5-min boundary)
+
+-- 1-hour time slots
+SELECT time_slot(event_time, 3600) as slot, count()
+FROM events
+GROUP BY slot;
+```
+
+**Implementation:** `src/Functions/timeSlot.cpp`
+
+### make_date()
+
+Construct a Date from year, month, day components.
+
+**Syntax:**
+```sql
+make_date(year, month, day)
+```
+
+**Examples:**
+```sql
+SELECT make_date(2024, 3, 4);
+-- Result: 2024-03-04
+
+SELECT make_date(to_year(now()), to_month(now()), 1);
+-- Result: 2024-03-01 (first day of current month)
+```
+
+**Implementation:** `src/Functions/makeDate.cpp`
+
+## Performance Considerations
+
+### Timezone Conversions
+
+- Timezone lookups can be expensive
+- Cache timezone objects when possible
+- Prefer working in UTC internally, convert for display
+
+### Date Arithmetic
+
+- Integer arithmetic is faster than date functions
+- Use `to_unix_timestamp()` for duration calculations
+- Date functions are optimized but still have overhead
+
+### Indexing and Filtering
+
+- Date range filters benefit from indexes
+- Use appropriate date granularity (day vs hour vs second)
+- Partition tables by date for better performance
+
+## Best Practices
+
+1. **Use appropriate precision**: Don't use `DateTime64` unless you need sub-second precision
+2. **Prefer UTC internally**: Convert to local timezone only for display
+3. **Cache conversions**: Don't repeatedly convert the same values
+4. **Use date_trunc for grouping**: More efficient than extracting components
+5. **Leverage window functions**: Better than manual time bucketing
+
+## Examples: Common Patterns
+
+### Recent Events Filter
+
+```sql
+SELECT * FROM events
+WHERE event_time > now() - INTERVAL 1 HOUR;
+```
+
+### Daily Aggregation
+
+```sql
+SELECT 
+    to_date(event_time) as date,
+    count() as events,
+    uniq(user_id) as unique_users
+FROM events
+GROUP BY date;
+```
+
+### Hourly Trend Analysis
+
+```sql
+SELECT 
+    date_trunc('hour', event_time) as hour,
+    count() as event_count,
+    avg(value) as avg_value
+FROM sensor_data
+WHERE event_time > now() - INTERVAL 24 HOUR
+GROUP BY hour
+ORDER BY hour;
+```
+
+### Time-Based Partitioning
+
+```sql
+SELECT 
+    to_year(event_time) as year,
+    to_month(event_time) as month,
+    count() as events
+FROM events
+GROUP BY year, month
+ORDER BY year, month;
+```
+
+### Business Hours Filter
+
+```sql
+SELECT * FROM events
+WHERE to_day_of_week(event_time) <= 5  -- Monday-Friday
+  AND to_hour(event_time) BETWEEN 9 AND 17;  -- 9 AM - 5 PM
+```
+
+### Session Duration Calculation
+
+```sql
+SELECT 
+    session_id,
+    min(event_time) as session_start,
+    max(event_time) as session_end,
+    date_diff('minute', min(event_time), max(event_time)) as duration_minutes
+FROM user_events
+GROUP BY session_id;
+```
+
+## See Also
+
+- [Window Functions](/sql/functions/window) - Time-based windowing operations
+- [Aggregation Functions](/sql/functions/aggregation) - Aggregate over time windows
+- [Functions Overview](/sql/functions/overview) - All available function categories

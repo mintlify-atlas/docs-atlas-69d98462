@@ -1,0 +1,362 @@
+---
+title: CREATE EXTERNAL STREAM
+description: Connect to external data sources like Kafka, Pulsar, and more
+---
+
+CREATE EXTERNAL STREAM creates a connection to external data sources such as Kafka, Pulsar, ClickHouse, and others. External streams allow you to read from and write to external systems without storing data in Timeplus.
+
+## Syntax
+
+```sql
+CREATE EXTERNAL STREAM [IF NOT EXISTS] stream_name
+(
+    column_name1 type1,
+    column_name2 type2,
+    ...
+)
+SETTINGS
+    type='kafka'|'pulsar'|'nats'|'timeplus'|...,
+    [setting1=value1,]
+    [setting2=value2,]
+    ...;
+```
+
+## Common Parameters
+
+<ParamField path="stream_name" type="identifier" required>
+  The name of the external stream to create.
+</ParamField>
+
+<ParamField path="IF NOT EXISTS" type="boolean">
+  If specified, the statement will not raise an error if the stream already exists.
+</ParamField>
+
+<ParamField path="type" type="string" required>
+  The type of external stream. Options: `kafka`, `pulsar`, `nats`, `timeplus`, `http`, `iceberg`
+</ParamField>
+
+<ParamField path="data_format" type="string">
+  The message format for serialization/deserialization. Examples: `JSONEachRow`, `CSV`, `Avro`, `Protobuf`, `RawBLOB`
+</ParamField>
+
+## Kafka External Stream
+
+### Required Settings
+
+<ParamField path="brokers" type="string" required>
+  Comma-separated list of Kafka broker addresses. Example: `'localhost:9092'` or `'broker1:9092,broker2:9092'`
+</ParamField>
+
+<ParamField path="topic" type="string" required>
+  The Kafka topic name to read from or write to.
+</ParamField>
+
+### Authentication Settings
+
+<ParamField path="security_protocol" type="string">
+  The security protocol for connecting to Kafka. Options:
+  - `plaintext` (default): No encryption or authentication
+  - `SASL_SSL`: SASL authentication over SSL/TLS
+  - `SASL_PLAINTEXT`: SASL authentication without encryption
+  - `SSL`: SSL/TLS encryption without SASL
+</ParamField>
+
+<ParamField path="sasl_mechanism" type="string">
+  SASL mechanism for authentication. Options: `PLAIN`, `SCRAM-SHA-256`, `SCRAM-SHA-512`, `AWS_MSK_IAM`
+</ParamField>
+
+<ParamField path="username" type="string">
+  Username for SASL authentication.
+</ParamField>
+
+<ParamField path="password" type="string">
+  Password for SASL authentication.
+</ParamField>
+
+### SSL/TLS Settings
+
+<ParamField path="ssl_ca_cert_file" type="string">
+  Path to the CA certificate file for SSL/TLS verification.
+</ParamField>
+
+<ParamField path="ssl_ca_pem" type="string">
+  CA certificate string in PEM format for verifying the server's key.
+</ParamField>
+
+<ParamField path="skip_ssl_cert_check" type="boolean">
+  If true, the server's certificate won't be verified. Default: false.
+</ParamField>
+
+### AWS MSK IAM Authentication
+
+<ParamField path="region" type="string">
+  AWS region for MSK IAM authentication.
+</ParamField>
+
+<ParamField path="access_key_id" type="string">
+  AWS access key ID.
+</ParamField>
+
+<ParamField path="secret_access_key" type="string">
+  AWS secret access key.
+</ParamField>
+
+<ParamField path="session_token" type="string">
+  AWS session token for temporary credentials.
+</ParamField>
+
+<ParamField path="use_environment_credentials" type="boolean">
+  Use credentials from environment variables. Default: false.
+</ParamField>
+
+### Advanced Settings
+
+<ParamField path="properties" type="string">
+  Semicolon-separated key-value pairs for additional Kafka client properties.
+  Example: `'client.id=my-client;group.id=my-group'`
+</ParamField>
+
+<ParamField path="poll_waittime_ms" type="integer">
+  How long poll should wait in milliseconds. Default: 500.
+</ParamField>
+
+<ParamField path="one_message_per_row" type="boolean">
+  If true, produces one Kafka message per row when using row-based formats like JSONEachRow. Default: false.
+</ParamField>
+
+<ParamField path="sharding_expr" type="string">
+  Expression to calculate partition ID for data distribution.
+</ParamField>
+
+<ParamField path="schema_subject_name" type="string">
+  Avro/Protobuf schema subject name in the schema registry.
+</ParamField>
+
+<ParamField path="consumer_stall_timeout_ms" type="integer">
+  Time in milliseconds after which a stalled consumer is recreated. Default: 60000. Set to 0 to disable.
+</ParamField>
+
+<ParamField path="connection_timeout_ms" type="integer">
+  Timeout in milliseconds for establishing a broker connection. Default: 10000.
+</ParamField>
+
+### Kafka Examples
+
+#### Basic Kafka External Stream
+
+```sql
+CREATE EXTERNAL STREAM frontend_events (
+    raw string
+)
+SETTINGS
+    type='kafka',
+    brokers='redpanda:9092',
+    topic='owlshop-frontend-events';
+```
+
+#### Kafka with SASL Authentication
+
+```sql
+CREATE EXTERNAL STREAM user_events (
+    user_id int64,
+    event_type string,
+    timestamp datetime64(3)
+)
+SETTINGS
+    type='kafka',
+    brokers='broker:9093',
+    topic='events',
+    security_protocol='SASL_SSL',
+    sasl_mechanism='PLAIN',
+    username='myuser',
+    password='mypassword';
+```
+
+#### AWS MSK with IAM Authentication
+
+```sql
+CREATE EXTERNAL STREAM aws_msk_stream (
+    device string,
+    temperature float
+)
+SETTINGS
+    type='kafka',
+    brokers='prefix.kafka.us-west-2.amazonaws.com:9098',
+    topic='iot-data',
+    security_protocol='SASL_SSL',
+    sasl_mechanism='AWS_MSK_IAM';
+```
+
+#### Kafka with Avro Schema Registry
+
+```sql
+CREATE EXTERNAL STREAM orders (
+    order_id int,
+    customer_id int,
+    amount float
+)
+SETTINGS
+    type='kafka',
+    brokers='localhost:9092',
+    topic='orders',
+    data_format='Avro',
+    schema_subject_name='orders-value';
+```
+
+#### Debezium CDC from Kafka
+
+```sql
+CREATE EXTERNAL STREAM customers_cdc (
+    raw string
+)
+SETTINGS
+    type='kafka',
+    brokers='redpanda:9092',
+    topic='dbserver1.inventory.customers';
+```
+
+## Pulsar External Stream
+
+### Pulsar Settings
+
+<ParamField path="service_url" type="string" required>
+  The Pulsar service URL. Example: `'pulsar://localhost:6650'` or `'pulsar+ssl://localhost:6651'`
+</ParamField>
+
+<ParamField path="topic" type="string" required>
+  The Pulsar topic name.
+</ParamField>
+
+<ParamField path="skip_server_cert_check" type="boolean">
+  Accept untrusted TLS certificates from brokers. Default: false.
+</ParamField>
+
+<ParamField path="validate_hostname" type="boolean">
+  Validate hostname when connecting over TLS. Default: false.
+</ParamField>
+
+<ParamField path="ca_cert" type="string">
+  CA certificate in PEM format for server verification.
+</ParamField>
+
+<ParamField path="client_cert" type="string">
+  Client certificate in PEM format for mTLS authentication.
+</ParamField>
+
+<ParamField path="client_key" type="string">
+  Client private key in PEM format for mTLS authentication.
+</ParamField>
+
+<ParamField path="jwt" type="string">
+  JSON Web Token for JWT authentication.
+</ParamField>
+
+<ParamField path="connections_per_broker" type="integer">
+  Maximum connections per broker. Default: 1.
+</ParamField>
+
+<ParamField path="memory_limit" type="integer">
+  Memory limit in bytes. 0 means unlimited. Default: 0.
+</ParamField>
+
+<ParamField path="io_threads" type="integer">
+  Number of I/O threads. Default: 1.
+</ParamField>
+
+### Pulsar Example
+
+```sql
+CREATE EXTERNAL STREAM pulsar_events (
+    event_id string,
+    data string
+)
+SETTINGS
+    type='pulsar',
+    service_url='pulsar://pulsar-broker:6650',
+    topic='persistent://public/default/events';
+```
+
+## NATS JetStream External Stream
+
+### NATS Settings
+
+<ParamField path="service_url" type="string" required>
+  NATS server URL. Example: `'nats://localhost:4222'`
+</ParamField>
+
+<ParamField path="subject" type="string" required>
+  Subject filter for subscribing. Supports wildcards: `orders.>` or `orders.*`
+</ParamField>
+
+<ParamField path="stream_name" type="string" required>
+  JetStream stream name (must already exist).
+</ParamField>
+
+<ParamField path="consumer_name" type="string">
+  Durable consumer name. Auto-generated if empty.
+</ParamField>
+
+<ParamField path="durable" type="boolean">
+  Create a durable consumer. Default: true.
+</ParamField>
+
+<ParamField path="ack_policy" type="string">
+  Acknowledgment policy: `none`, `all`, `explicit`. Default: `explicit`.
+</ParamField>
+
+<ParamField path="deliver_policy" type="string">
+  Delivery policy: `all`, `last`, `new`, `by_start_sequence`, `by_start_time`. Default: `all`.
+</ParamField>
+
+<ParamField path="batch_size" type="integer">
+  Messages to fetch per pull request. Default: 256.
+</ParamField>
+
+## HTTP External Stream
+
+### HTTP Settings
+
+<ParamField path="url" type="string">
+  HTTP endpoint for both read and write.
+</ParamField>
+
+<ParamField path="read_url" type="string">
+  HTTP endpoint for read operations.
+</ParamField>
+
+<ParamField path="write_url" type="string">
+  HTTP endpoint for write operations.
+</ParamField>
+
+<ParamField path="read_method" type="string">
+  HTTP method for reading. Default: `GET`.
+</ParamField>
+
+<ParamField path="write_method" type="string">
+  HTTP method for writing. Default: `POST`.
+</ParamField>
+
+<ParamField path="compression_method" type="string">
+  HTTP body compression: `none`, `gzip`, `br`, `deflate`. Default: `none`.
+</ParamField>
+
+<ParamField path="use_chunked_encoding" type="boolean">
+  Use chunked transfer encoding. Default: true.
+</ParamField>
+
+## Special Columns
+
+External streams support special columns for metadata:
+
+- `_tp_time` - Event timestamp
+- `_tp_message_key` - Message key (for Kafka/Pulsar)
+- `_tp_partition` - Partition ID
+- `_tp_offset` - Message offset
+- `_tp_sn` - Sequence number
+
+## See Also
+
+- [CREATE STREAM](/sql/create-stream) - Create internal streams
+- [CREATE MATERIALIZED VIEW](/sql/create-materialized-view) - Process external stream data
+- [SELECT](/sql/select) - Query external streams
+- [INSERT](/sql/insert) - Write to external streams

@@ -1,0 +1,474 @@
+---
+title: Window Functions
+description: Time-based windowing functions for stream processing in Timeplus Proton
+---
+
+Window functions are essential for stream processing, enabling you to group events by time intervals and perform aggregations over bounded time periods. Timeplus Proton provides three types of windows: tumbling, hopping, and session windows.
+
+## Window Types
+
+### Tumbling Windows
+
+Tumbling windows divide the stream into non-overlapping, consecutive time intervals of fixed size.
+
+**Syntax:**
+```sql
+tumble(stream_or_table, [timestamp_column], window_size, [timezone])
+```
+
+**Parameters:**
+- `stream_or_table`: The stream or table name
+- `timestamp_column`: (Optional) Column for event time; if omitted, uses processing time
+- `window_size`: INTERVAL expression (e.g., `INTERVAL 5 SECOND`, `5s`)
+- `timezone`: (Optional) Timezone string (e.g., `'America/New_York'`)
+
+**Examples:**
+```sql
+-- 5-second tumbling windows
+SELECT window_start, window_end, device, count(), avg(temperature)
+FROM tumble(sensor_data, 5s)
+GROUP BY window_start, window_end, device;
+
+-- 1-minute windows with explicit timestamp column
+SELECT window_start, count() as event_count
+FROM tumble(events, event_time, INTERVAL 1 MINUTE)
+GROUP BY window_start;
+
+-- Hourly windows with timezone
+SELECT window_start, count()
+FROM tumble(page_views, INTERVAL 1 HOUR, 'America/Los_Angeles')
+GROUP BY window_start;
+```
+
+**Characteristics:**
+- Non-overlapping windows
+- Each event belongs to exactly one window
+- Fixed, predictable boundaries
+- Memory efficient - bounded state per window
+
+**Use Cases:**
+- Periodic reporting (hourly, daily metrics)
+- Rate limiting and throttling
+- Simple aggregations over fixed intervals
+- Time-series downsampling
+
+**Implementation:** Window assignment in `src/Processors/Transforms/Streaming/`
+
+### Hopping Windows
+
+Hopping windows (also called sliding windows) overlap by sliding forward at regular intervals, with a window size that can be larger than the slide interval.
+
+**Syntax:**
+```sql
+hop(stream_or_table, [timestamp_column], slide_interval, window_size, [timezone])
+```
+
+**Parameters:**
+- `stream_or_table`: The stream or table name
+- `timestamp_column`: (Optional) Column for event time
+- `slide_interval`: How often to create a new window (hop step)
+- `window_size`: Size of each window
+- `timezone`: (Optional) Timezone string
+
+**Examples:**
+```sql
+-- 10-second windows, sliding every 5 seconds (50% overlap)
+SELECT window_start, window_end, count()
+FROM hop(events, 5s, 10s)
+GROUP BY window_start, window_end;
+
+-- 1-hour windows, sliding every 15 minutes
+SELECT window_start, device, avg(temperature)
+FROM hop(sensor_data, event_time, INTERVAL 15 MINUTE, INTERVAL 1 HOUR)
+GROUP BY window_start, device;
+
+-- Moving average: 5-minute window, 1-minute slide
+SELECT window_start, avg(price) as moving_avg
+FROM hop(trades, INTERVAL 1 MINUTE, INTERVAL 5 MINUTE)
+GROUP BY window_start;
+```
+
+**Characteristics:**
+- Overlapping windows when `window_size > slide_interval`
+- Each event can belong to multiple windows
+- More frequent updates than tumbling windows
+- Higher memory usage due to overlapping state
+
+**Use Cases:**
+- Moving averages and smoothing
+- Detecting trends over sliding time periods
+- Real-time dashboards with frequent updates
+- Anomaly detection with contextual windows
+
+**Implementation:** `src/Processors/Transforms/Streaming/HopWindowAssignmentTransform.cpp`, with optimization via greatest common divisor (GCD) to share base windows.
+
+### Session Windows
+
+Session windows group events based on periods of activity, separated by timeout intervals. A new session begins after a period of inactivity.
+
+**Syntax:**
+```sql
+session(stream, [timestamp_column], timeout_interval, [max_session_size], [session_range_comparison])
+```
+
+**Parameters:**
+- `stream`: The stream name
+- `timestamp_column`: (Optional) Column for event time
+- `timeout_interval`: Inactivity timeout that ends a session
+- `max_session_size`: (Optional) Maximum session duration
+- `session_range_comparison`: (Optional) Additional session boundary conditions
+
+**Examples:**
+```sql
+-- Session timeout of 5 minutes
+SELECT window_start, window_end, user_id, count() as events_in_session
+FROM session(user_events, INTERVAL 5 MINUTE)
+GROUP BY window_start, window_end, user_id;
+
+-- Session with timeout and max duration
+SELECT 
+    window_start, 
+    window_end, 
+    user_id, 
+    count() as page_views,
+    window_end - window_start as session_duration
+FROM session(page_views, event_time, INTERVAL 30 MINUTE, INTERVAL 4 HOUR)
+GROUP BY window_start, window_end, user_id;
+
+-- User sessions with 10-second timeout
+SELECT 
+    user_id,
+    window_start as session_start,
+    window_end as session_end,
+    count() as actions,
+    uniq(page) as unique_pages
+FROM session(clickstream, INTERVAL 10 SECOND)
+GROUP BY window_start, window_end, user_id;
+```
+
+**Characteristics:**
+- Data-driven window boundaries (not time-driven)
+- Variable-length windows based on activity
+- A session ends after timeout period of inactivity
+- Can span very long or very short durations
+
+**Use Cases:**
+- User session analysis
+- Click stream analytics
+- IoT device activity tracking
+- Application usage patterns
+- Workflow and process mining
+
+**Implementation:** `src/Processors/Transforms/Streaming/SessionWindowAssignmentTransform.cpp` with special pushdown window assignment.
+
+## Window Metadata Functions
+
+### window_start
+
+Returns the start timestamp of the current window.
+
+**Syntax:**
+```sql
+window_start
+```
+
+**Examples:**
+```sql
+SELECT window_start, count()
+FROM tumble(events, 1m)
+GROUP BY window_start;
+
+-- Format window start time
+SELECT 
+    format_datetime(window_start, '%Y-%m-%d %H:%i:%s') as window_time,
+    count()
+FROM tumble(events, 1h)
+GROUP BY window_start;
+```
+
+**Type:** `DateTime` or `DateTime64` depending on the source timestamp type
+
+### window_end
+
+Returns the end timestamp of the current window (exclusive).
+
+**Syntax:**
+```sql
+window_end
+```
+
+**Examples:**
+```sql
+SELECT window_start, window_end, count()
+FROM tumble(events, 5s)
+GROUP BY window_start, window_end;
+
+-- Calculate window duration
+SELECT 
+    window_start,
+    window_end,
+    window_end - window_start as window_duration_sec,
+    count()
+FROM session(user_events, INTERVAL 5 MINUTE)
+GROUP BY window_start, window_end;
+```
+
+**Type:** `DateTime` or `DateTime64` depending on the source timestamp type
+
+**Note:** Window intervals are `[window_start, window_end)` - inclusive start, exclusive end.
+
+## Window Intervals
+
+Window intervals can be specified using:
+
+### Interval Syntax
+
+```sql
+INTERVAL n unit
+```
+
+Supported units:
+- **Nanosecond**: `INTERVAL 500 NANOSECOND`
+- **Microsecond**: `INTERVAL 1000 MICROSECOND`
+- **Millisecond**: `INTERVAL 100 MILLISECOND`
+- **Second**: `INTERVAL 30 SECOND`
+- **Minute**: `INTERVAL 5 MINUTE`
+- **Hour**: `INTERVAL 1 HOUR`
+- **Day**: `INTERVAL 7 DAY`
+- **Week**: `INTERVAL 2 WEEK`
+- **Month**: `INTERVAL 1 MONTH`
+- **Quarter**: `INTERVAL 1 QUARTER`
+- **Year**: `INTERVAL 1 YEAR`
+
+### Shorthand Syntax
+
+```sql
+5s    -- 5 seconds
+1m    -- 1 minute
+2h    -- 2 hours
+1d    -- 1 day
+```
+
+**Examples:**
+```sql
+-- All equivalent: 10-second windows
+tumble(events, INTERVAL 10 SECOND)
+tumble(events, 10s)
+
+-- 1-hour windows
+tumble(events, INTERVAL 1 HOUR)
+tumble(events, 1h)
+```
+
+## Event Time vs Processing Time
+
+### Event Time
+
+Use explicit timestamp column for event-time processing:
+
+```sql
+-- Event time from 'event_time' column
+SELECT window_start, count()
+FROM tumble(events, event_time, 1m)
+GROUP BY window_start;
+```
+
+**Benefits:**
+- Handles out-of-order events correctly
+- Deterministic results independent of processing speed
+- Replay produces same results
+
+**Considerations:**
+- Requires timestamp column in data
+- May need watermarks for late data handling
+
+### Processing Time
+
+Omit timestamp column to use current system time:
+
+```sql
+-- Processing time (current time)
+SELECT window_start, count()
+FROM tumble(events, 1m)
+GROUP BY window_start;
+```
+
+**Benefits:**
+- Simple - no timestamp column needed
+- Lower latency - no waiting for watermarks
+- Useful for monitoring current activity
+
+**Considerations:**
+- Non-deterministic results
+- Cannot replay with same results
+- Affected by processing delays
+
+## Advanced Window Patterns
+
+### Cascading Windows
+
+Create hierarchical aggregations:
+
+```sql
+-- First level: 1-minute aggregates
+CREATE MATERIALIZED VIEW minute_stats AS
+SELECT window_start, device, count() as count_1m, avg(value) as avg_1m
+FROM tumble(sensor_data, 1m)
+GROUP BY window_start, device;
+
+-- Second level: 1-hour aggregates from minute data
+SELECT 
+    to_start_of_hour(window_start) as hour,
+    device,
+    sum(count_1m) as count_1h,
+    avg(avg_1m) as avg_1h
+FROM minute_stats
+GROUP BY hour, device;
+```
+
+### Multi-Window Analysis
+
+Compare different window sizes:
+
+```sql
+SELECT 
+    t1.window_start,
+    t1.avg_temp as avg_1m,
+    t2.avg_temp as avg_5m,
+    t3.avg_temp as avg_15m
+FROM 
+    (SELECT window_start, avg(temperature) as avg_temp FROM tumble(sensor_data, 1m) GROUP BY window_start) t1
+LEFT JOIN
+    (SELECT window_start, avg(temperature) as avg_temp FROM tumble(sensor_data, 5m) GROUP BY window_start) t2
+    ON to_start_of_interval(t1.window_start, INTERVAL 5 MINUTE) = t2.window_start
+LEFT JOIN
+    (SELECT window_start, avg(temperature) as avg_temp FROM tumble(sensor_data, 15m) GROUP BY window_start) t3
+    ON to_start_of_interval(t1.window_start, INTERVAL 15 MINUTE) = t3.window_start;
+```
+
+### Window Joins
+
+Join streams in the same window:
+
+```sql
+SELECT 
+    t.window_start,
+    count(t.transaction_id) as transactions,
+    count(r.refund_id) as refunds
+FROM tumble(transactions, 1h) t
+LEFT JOIN tumble(refunds, 1h) r
+    ON t.window_start = r.window_start 
+    AND t.customer_id = r.customer_id
+GROUP BY t.window_start;
+```
+
+## Performance Considerations
+
+### Memory Management
+
+**Tumbling Windows:**
+- Most memory efficient
+- State bounded by window size
+- Old windows can be immediately freed
+
+**Hopping Windows:**
+- Memory proportional to `window_size / slide_interval`
+- Uses GCD optimization to share base windows
+- Example: 1-hour window, 5-minute slide = 12x memory vs tumbling
+
+**Session Windows:**
+- Variable memory based on session patterns
+- Use `max_session_size` to bound memory
+- Can accumulate state for long-running sessions
+
+### Computational Efficiency
+
+- **Incremental aggregation**: Updates computed per event, not per window
+- **Base window sharing**: Hopping windows share computation via GCD
+- **Parallel processing**: Windows can be computed in parallel
+
+### Best Practices
+
+1. **Choose appropriate window size**: Balance latency vs completeness
+2. **Use tumbling when possible**: More efficient than hopping
+3. **Bound session windows**: Set `max_session_size` to prevent unbounded growth
+4. **Consider timezone**: Align windows with business hours
+5. **Monitor state size**: Use metrics to track window state memory
+
+## Watermarks and Late Data
+
+Watermarks track event time progress and determine when to emit window results:
+
+```sql
+-- Windows emit when watermark passes window_end
+-- Late events after watermark may be dropped or handled specially
+```
+
+Configuration:
+- Watermark generation based on event timestamps
+- Late data tolerance configurable
+- Out-of-order handling
+
+## Examples: Common Use Cases
+
+### Real-Time Dashboard (Tumbling)
+
+```sql
+CREATE MATERIALIZED VIEW dashboard_metrics AS
+SELECT 
+    window_start as time,
+    count() as requests,
+    avg(response_time) as avg_latency,
+    quantile(0.95)(response_time) as p95_latency,
+    countIf(status >= 500) as errors
+FROM tumble(http_logs, 1m)
+GROUP BY window_start;
+```
+
+### Moving Average (Hopping)
+
+```sql
+SELECT 
+    window_start,
+    symbol,
+    avg(price) as moving_avg_price,
+    min(price) as min_price,
+    max(price) as max_price
+FROM hop(stock_trades, trade_time, 10s, 1m)
+GROUP BY window_start, symbol;
+```
+
+### User Session Analysis (Session)
+
+```sql
+SELECT 
+    user_id,
+    window_start as session_start,
+    window_end as session_end,
+    count() as actions,
+    count(distinct page) as unique_pages,
+    sum(duration) as total_time,
+    window_end - window_start as session_length
+FROM session(user_activity, INTERVAL 30 MINUTE)
+GROUP BY window_start, window_end, user_id
+HAVING count() > 5;  -- Filter short sessions
+```
+
+### Anomaly Detection (Hopping)
+
+```sql
+SELECT 
+    window_start,
+    device,
+    avg(temperature) as avg_temp,
+    stddev(temperature) as stddev_temp
+FROM hop(sensor_data, 1m, 5m)
+GROUP BY window_start, device
+HAVING stddev(temperature) > 10;  -- Alert on high variance
+```
+
+## See Also
+
+- [Aggregation Functions](/sql/functions/aggregation) - Functions to use within windows
+- [Time Functions](/sql/functions/time) - Working with timestamps
+- [Functions Overview](/sql/functions/overview) - All available functions

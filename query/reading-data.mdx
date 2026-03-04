@@ -1,0 +1,416 @@
+---
+title: Reading Data from Streams
+description: Query and filter streaming data in Timeplus Proton
+---
+
+Timeplus Proton supports standard SQL SELECT queries with extensions for streaming semantics.
+
+## Basic SELECT Queries
+
+### Streaming Select
+
+Query streams in real-time mode:
+
+```sql
+-- Stream all events as they arrive
+SELECT * FROM events;
+
+-- Select specific columns
+SELECT event_id, user_id, event_type 
+FROM events;
+```
+
+Streaming queries:
+- Start from the latest data by default
+- Run continuously until cancelled
+- Return results as events arrive
+
+### Historical Select
+
+Query historical data using the `table()` function:
+
+```sql
+-- Query all historical data
+SELECT * FROM table(events);
+
+-- Query with ordering
+SELECT * FROM table(events)
+ORDER BY event_time DESC
+LIMIT 100;
+```
+
+## Filtering with WHERE
+
+### Basic Filtering
+
+```sql
+-- Filter by column value
+SELECT * FROM transactions
+WHERE amount > 1000;
+
+-- Multiple conditions
+SELECT * FROM events
+WHERE event_type = 'purchase' 
+  AND user_id > 100;
+
+-- String matching
+SELECT * FROM logs
+WHERE message LIKE '%error%';
+```
+
+### Time-based Filtering
+
+Filter by event time using `_tp_time`:
+
+```sql
+-- Events from last hour
+SELECT * FROM events
+WHERE _tp_time > now() - INTERVAL 1 HOUR;
+
+-- Specific date range (historical)
+SELECT * FROM table(events)
+WHERE _tp_time >= '2024-01-01'
+  AND _tp_time < '2024-02-01';
+
+-- Events from today
+SELECT * FROM table(events)
+WHERE to_date(_tp_time) = today();
+```
+
+## Projection and Transformation
+
+### Column Selection
+
+```sql
+-- Select specific columns
+SELECT user_id, event_type, event_time
+FROM events;
+
+-- Column aliases
+SELECT 
+  user_id as uid,
+  event_type as type,
+  event_time as ts
+FROM events;
+
+-- Exclude columns with EXCEPT
+SELECT * EXCEPT (_tp_time, _tp_sn)
+FROM events;
+```
+
+### Column Transformations
+
+```sql
+-- Apply functions
+SELECT 
+  upper(event_type) as event_type,
+  amount * 1.1 as amount_with_tax,
+  to_string(event_time) as time_str
+FROM events;
+
+-- Conditional expressions
+SELECT 
+  order_id,
+  CASE 
+    WHEN amount < 100 THEN 'small'
+    WHEN amount < 1000 THEN 'medium'
+    ELSE 'large'
+  END as order_size
+FROM orders;
+```
+
+## Query Settings
+
+### Controlling Start Position
+
+Control where streaming queries begin:
+
+```sql
+-- Start from earliest available data
+SELECT * FROM events
+SETTINGS seek_to = 'earliest';
+
+-- Start from latest (default)
+SELECT * FROM events
+SETTINGS seek_to = 'latest';
+
+-- Specify timestamp
+SELECT * FROM events
+SETTINGS seek_to = '2024-01-01 00:00:00';
+```
+
+### Performance Settings
+
+```sql
+-- Limit parallel processing
+SELECT * FROM events
+SETTINGS max_threads = 4;
+
+-- Memory limits
+SELECT * FROM events
+SETTINGS max_memory_usage = 10000000000;  -- 10GB
+```
+
+## Streaming vs Historical Queries
+
+### Streaming Query Characteristics
+
+```sql
+-- This runs continuously
+SELECT device_id, temperature 
+FROM sensor_readings
+WHERE temperature > 80;
+```
+
+Streaming mode:
+- Unbounded data processing
+- Real-time results
+- No automatic termination
+- Lower latency
+
+### Historical Query Characteristics
+
+```sql
+-- This processes bounded data and terminates
+SELECT device_id, avg(temperature) as avg_temp
+FROM table(sensor_readings)
+GROUP BY device_id
+ORDER BY avg_temp DESC;
+```
+
+Historical mode:
+- Bounded dataset
+- Complete result set
+- Automatic termination
+- Supports ORDER BY, LIMIT globally
+
+## Subqueries
+
+### Historical Subqueries
+
+```sql
+-- Subquery for filtering
+SELECT * FROM events
+WHERE user_id IN (
+  SELECT user_id FROM table(premium_users)
+);
+
+-- Derived tables
+SELECT 
+  date,
+  avg(daily_total) as avg_daily
+FROM (
+  SELECT 
+    to_date(_tp_time) as date,
+    sum(amount) as daily_total
+  FROM table(transactions)
+  GROUP BY date
+)
+GROUP BY date;
+```
+
+### WITH Common Table Expressions
+
+```sql
+WITH high_value_users AS (
+  SELECT user_id, sum(amount) as total
+  FROM table(transactions)
+  WHERE _tp_time > now() - INTERVAL 30 DAY
+  GROUP BY user_id
+  HAVING total > 10000
+)
+SELECT 
+  e.event_type,
+  count() as event_count
+FROM events e
+INNER JOIN high_value_users h ON e.user_id = h.user_id
+GROUP BY e.event_type;
+```
+
+## LIMIT and Sampling
+
+### LIMIT in Historical Queries
+
+```sql
+-- Limit results in historical query
+SELECT * FROM table(events)
+ORDER BY _tp_time DESC
+LIMIT 100;
+```
+
+### LIMIT in Streaming Queries
+
+```sql
+-- Process first 1000 events then stop
+SELECT * FROM events
+LIMIT 1000;
+
+-- Limit per time window
+SELECT count(*) as cnt
+FROM events
+LIMIT 5 EMIT PERIODIC INTERVAL 1 SECOND;
+```
+
+## DISTINCT
+
+Get unique values:
+
+```sql
+-- Distinct event types (historical)
+SELECT DISTINCT event_type 
+FROM table(events);
+
+-- Count distinct users
+SELECT count(DISTINCT user_id) as unique_users
+FROM table(events)
+WHERE to_date(_tp_time) = today();
+```
+
+## Working with JSON Data
+
+### Extract JSON Fields
+
+```sql
+-- Parse JSON string column
+SELECT 
+  event_id,
+  json_extract_string(metadata, 'user_agent') as user_agent,
+  json_extract_int(metadata, 'session_duration') as duration
+FROM events;
+
+-- JSON path expressions
+SELECT 
+  json_extract(payload, '$.user.id') as user_id,
+  json_extract(payload, '$.items[0].price') as first_item_price
+FROM orders;
+```
+
+## Complete Query Examples
+
+### Real-time Monitoring
+
+```sql
+-- Monitor high-value transactions in real-time
+SELECT 
+  transaction_id,
+  user_id,
+  amount,
+  currency,
+  created_at
+FROM transactions
+WHERE amount > 10000
+  AND status = 'completed';
+```
+
+### Historical Analysis
+
+```sql
+-- Analyze yesterday's user activity
+SELECT 
+  event_type,
+  count() as event_count,
+  count(DISTINCT user_id) as unique_users,
+  avg(CASE WHEN event_type = 'purchase' THEN 1 ELSE 0 END) as purchase_rate
+FROM table(events)
+WHERE to_date(_tp_time) = today() - 1
+GROUP BY event_type
+ORDER BY event_count DESC;
+```
+
+### Filtered Streaming
+
+```sql
+-- Stream only anomalous sensor readings
+SELECT 
+  sensor_id,
+  temperature,
+  humidity,
+  reading_time,
+  CASE
+    WHEN temperature > 100 THEN 'temp_high'
+    WHEN temperature < -20 THEN 'temp_low'
+    WHEN humidity > 95 THEN 'humidity_high'
+    ELSE 'normal'
+  END as alert_type
+FROM iot_sensors
+WHERE temperature > 100 
+   OR temperature < -20 
+   OR humidity > 95
+SETTINGS seek_to = 'earliest';
+```
+
+### Time Window Queries
+
+```sql
+-- Get latest value per device in last 5 minutes
+SELECT 
+  device_id,
+  any_last(temperature) as latest_temp,
+  max(_tp_time) as last_reading
+FROM table(sensor_readings)
+WHERE _tp_time > now() - INTERVAL 5 MINUTE
+GROUP BY device_id;
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use WHERE clauses early">
+    Filter data as early as possible to reduce processing:
+    ```sql
+    -- Good: Filter before processing
+    SELECT user_id, count() 
+    FROM events 
+    WHERE event_type = 'purchase'
+    GROUP BY user_id;
+    
+    -- Less efficient: Filter after aggregation
+    SELECT user_id, cnt FROM (
+      SELECT user_id, event_type, count() as cnt
+      FROM events
+      GROUP BY user_id, event_type
+    ) WHERE event_type = 'purchase';
+    ```
+  </Accordion>
+  
+  <Accordion title="Choose appropriate query mode">
+    - Use streaming queries for real-time monitoring and alerts
+    - Use `table()` for analytical queries and reporting
+    - Consider data volume when choosing mode
+  </Accordion>
+  
+  <Accordion title="Leverage column projection">
+    Select only needed columns to reduce network and memory overhead:
+    ```sql
+    -- Good: Select specific columns
+    SELECT user_id, event_type FROM events;
+    
+    -- Avoid: SELECT * when not needed
+    SELECT * FROM events;  -- Transfers all columns
+    ```
+  </Accordion>
+  
+  <Accordion title="Use LIMIT for exploration">
+    When exploring data, use LIMIT to avoid overwhelming results:
+    ```sql
+    SELECT * FROM events LIMIT 10;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Writing Data" icon="pen" href="/query/writing-data">
+    Learn how to insert data into streams
+  </Card>
+  <Card title="Aggregations" icon="chart-bar" href="/query/aggregations">
+    Perform streaming aggregations
+  </Card>
+  <Card title="Time Windows" icon="clock" href="/query/time-windows">
+    Use time-based windows
+  </Card>
+  <Card title="Joins" icon="link" href="/query/joins">
+    Join multiple streams
+  </Card>
+</CardGroup>

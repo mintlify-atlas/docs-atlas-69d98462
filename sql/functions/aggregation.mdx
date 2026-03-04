@@ -1,0 +1,437 @@
+---
+title: Aggregation Functions
+description: Aggregate functions for streaming and batch analytics in Timeplus Proton
+---
+
+Aggregation functions perform calculations across multiple rows and return a single result. In Timeplus Proton, these functions work in both batch and streaming contexts, with special semantics for continuous stream processing.
+
+## Basic Aggregate Functions
+
+### count()
+
+Counts the number of rows or non-NULL values.
+
+**Syntax:**
+```sql
+count()           -- Count all rows
+count(column)     -- Count non-NULL values
+count(*)          -- Count all rows (same as count())
+```
+
+**Examples:**
+```sql
+-- Batch: Count all events
+SELECT count() FROM events;
+
+-- Streaming: Continuous count by device
+SELECT device, count() 
+FROM devices 
+GROUP BY device;
+
+-- With window: Count events per 5-second window
+SELECT window_start, device, count() 
+FROM tumble(devices, 5s) 
+GROUP BY window_start, device;
+```
+
+**Properties:**
+- Returns `0` when input is empty
+- `count(column)` excludes NULL values
+- `count(*)` and `count()` include all rows
+
+**Implementation:** Defined in `src/AggregateFunctions/AggregateFunctionCount.cpp`
+
+### sum()
+
+Calculates the sum of numeric values.
+
+**Syntax:**
+```sql
+sum(column)
+```
+
+**Variants:**
+- `sum(x)` - Standard sum with type promotion
+- `sum_with_overflow(x)` - Sum with potential overflow, same result type
+- `sum_kahan(x)` - Kahan compensated summation for better floating-point precision
+
+**Examples:**
+```sql
+-- Total temperature readings
+SELECT sum(temperature) FROM sensor_data;
+
+-- Streaming sum by device
+SELECT device, sum(temperature) 
+FROM devices 
+GROUP BY device;
+
+-- Windowed sum
+SELECT window_start, sum(value) 
+FROM tumble(events, 10s) 
+GROUP BY window_start;
+```
+
+**Properties:**
+- Returns NULL for empty input
+- Type promotion: integer → Int64/UInt64, float → Float64
+- Supports integers, floats, and decimals
+
+**Implementation:** Defined in `src/AggregateFunctions/AggregateFunctionSum.cpp`
+
+### avg()
+
+Calculates the arithmetic mean of values.
+
+**Syntax:**
+```sql
+avg(column)
+```
+
+**Examples:**
+```sql
+-- Average temperature
+SELECT avg(temperature) FROM sensor_data;
+
+-- Streaming average per device
+SELECT device, avg(temperature) 
+FROM devices 
+GROUP BY device;
+
+-- Moving average with tumbling window
+SELECT window_start, device, avg(temperature) 
+FROM tumble(devices, 1m) 
+GROUP BY window_start, device;
+```
+
+**Properties:**
+- Returns NULL for empty input
+- Supports int, uint, float, and decimal types
+- Result type is always Float64 for integers, preserves precision for decimals
+
+**Implementation:** Defined in `src/AggregateFunctions/AggregateFunctionAvg.cpp`
+
+### min() / max()
+
+Return the minimum or maximum value.
+
+**Syntax:**
+```sql
+min(column)
+max(column)
+```
+
+**Examples:**
+```sql
+-- Temperature range
+SELECT min(temperature), max(temperature) 
+FROM sensor_data;
+
+-- Streaming min/max per window
+SELECT 
+    window_start, 
+    device, 
+    min(temperature) as min_temp,
+    max(temperature) as max_temp
+FROM tumble(devices, 5m) 
+GROUP BY window_start, device;
+```
+
+**Properties:**
+- Returns NULL for empty input
+- Works with any comparable type (numbers, strings, dates)
+- Maintains data type of input column
+
+**Implementation:** Defined in `src/AggregateFunctions/AggregateFunctionMin.cpp` and `AggregateFunctionMax.cpp`
+
+## Advanced Aggregate Functions
+
+### arg_min() / arg_max()
+
+Returns the value of one column when another column reaches its minimum or maximum.
+
+**Syntax:**
+```sql
+arg_min(value_column, comparison_column)
+arg_max(value_column, comparison_column)
+```
+
+**Examples:**
+```sql
+-- Device ID with lowest temperature reading
+SELECT arg_min(device, temperature) FROM sensor_data;
+
+-- Most recent status for each user
+SELECT 
+    user_id,
+    arg_max(status, timestamp) as latest_status
+FROM user_events
+GROUP BY user_id;
+```
+
+**Properties:**
+- Order-dependent operation
+- Useful for "latest value" patterns in streaming
+
+### uniq()
+
+Estimates the number of unique values using HyperLogLog algorithm.
+
+**Syntax:**
+```sql
+uniq(column)
+```
+
+**Examples:**
+```sql
+-- Unique visitors per window
+SELECT window_start, uniq(user_id) as unique_users
+FROM tumble(page_views, 1h)
+GROUP BY window_start;
+```
+
+**Properties:**
+- Approximate count with memory efficiency
+- Accurate for small cardinalities, ~2% error for large sets
+
+### group_array()
+
+Collects all values into an array.
+
+**Syntax:**
+```sql
+group_array(column)
+group_array(limit)(column)  -- Limit array size
+```
+
+**Examples:**
+```sql
+-- Collect all temperatures in window
+SELECT window_start, device, group_array(temperature)
+FROM tumble(sensor_data, 1m)
+GROUP BY window_start, device;
+```
+
+### quantile() / median()
+
+Calculate quantiles (percentiles) of numeric data.
+
+**Syntax:**
+```sql
+quantile(level)(column)        -- e.g., quantile(0.5) for median
+median(column)                 -- Alias for quantile(0.5)
+quantiles(level1, level2, ...)(column)  -- Multiple quantiles
+```
+
+**Examples:**
+```sql
+-- 95th percentile response time
+SELECT quantile(0.95)(response_time) FROM requests;
+
+-- Median per window
+SELECT window_start, median(temperature)
+FROM tumble(sensor_data, 5m)
+GROUP BY window_start;
+```
+
+### stddev() / variance()
+
+Calculate standard deviation and variance.
+
+**Syntax:**
+```sql
+stddev(column)      -- Sample standard deviation
+stddevPop(column)   -- Population standard deviation
+variance(column)    -- Sample variance
+varPop(column)      -- Population variance
+```
+
+## Streaming Aggregation Semantics
+
+### Continuous Computation
+
+In streaming queries, aggregations are computed continuously as new data arrives:
+
+```sql
+-- This query continuously updates as new data arrives
+SELECT device, count(), avg(temperature)
+FROM devices
+GROUP BY device;
+```
+
+Key behaviors:
+- Results update incrementally with each new event
+- State is maintained in memory for active groups
+- No final "complete" state - always evolving
+
+### Window-Based Aggregation
+
+Combine aggregations with window functions for bounded computation:
+
+```sql
+-- Tumbling window: non-overlapping 5-second windows
+SELECT window_start, window_end, device, count(), avg(temperature)
+FROM tumble(devices, 5s)
+GROUP BY window_start, window_end, device;
+```
+
+Window aggregation properties:
+- **Bounded state**: Each window has finite data
+- **Window emission**: Results emitted when window completes
+- **Resource management**: Completed windows can be freed from memory
+
+### State Management
+
+Proton manages aggregation state efficiently:
+
+1. **Incremental updates**: State updated with each event, not recalculated
+2. **Memory optimization**: Compact state representations
+3. **Checkpointing**: State can be persisted for fault tolerance (in clustering mode)
+
+Example of state evolution:
+```sql
+-- Each new event updates the running sum and count
+SELECT device, sum(value), count()
+FROM sensor_stream
+GROUP BY device;
+
+-- State for device 'sensor1':
+-- Event 1: sum=10, count=1
+-- Event 2: sum=25, count=2  (incremental update)
+-- Event 3: sum=40, count=3  (incremental update)
+```
+
+### Combinator Functions
+
+Aggregation functions can be modified with combinators for special behaviors:
+
+- **`-If` combinator**: Conditional aggregation
+  ```sql
+  SELECT countIf(temperature > 100), sumIf(value, status = 'active')
+  FROM devices;
+  ```
+
+- **`-State` combinator**: Return intermediate state
+  ```sql
+  SELECT countState() FROM events;  -- Returns state object
+  ```
+
+- **`-Merge` combinator**: Merge states
+  ```sql
+  SELECT countMerge(state) FROM intermediate_results;
+  ```
+
+## Aggregation with Multiple Levels
+
+Group by multiple columns for hierarchical aggregation:
+
+```sql
+SELECT 
+    window_start,
+    region,
+    device_type,
+    count() as event_count,
+    avg(temperature) as avg_temp,
+    max(temperature) as max_temp
+FROM tumble(devices, 1m)
+GROUP BY window_start, region, device_type;
+```
+
+## Performance Considerations
+
+### Memory Usage
+
+- **Unbounded groups**: Unlimited GROUP BY keys consume memory
+- **Use windows**: Bound memory with time-based windows
+- **State cleanup**: Completed windows release memory
+
+### Computational Efficiency
+
+- **Incremental computation**: O(1) update per event for most aggregates
+- **Pre-aggregation**: Consider pre-aggregating in materialized views
+- **Parallelization**: Aggregations can be parallelized across partitions
+
+### Best Practices
+
+1. **Use appropriate windows** for streaming queries to bound state
+2. **Choose efficient aggregates**: `count()` and `sum()` are more efficient than `median()`
+3. **Limit GROUP BY cardinality** when possible
+4. **Consider approximate algorithms**: `uniq()` vs `count(distinct)`
+
+## Aggregation in Materialized Views
+
+Materialized views can maintain pre-computed aggregations:
+
+```sql
+CREATE MATERIALIZED VIEW device_stats AS
+SELECT 
+    window_start,
+    device,
+    count() as event_count,
+    avg(temperature) as avg_temp,
+    min(temperature) as min_temp,
+    max(temperature) as max_temp
+FROM tumble(devices, 1m)
+GROUP BY window_start, device;
+
+-- Query the materialized view (fast!)
+SELECT * FROM device_stats WHERE device = 'sensor1';
+```
+
+Benefits:
+- Pre-computed results for fast queries
+- Reduced computation on raw data
+- Automatic maintenance as data arrives
+
+## Examples: Common Patterns
+
+### Running Totals
+
+```sql
+SELECT device, sum(value) as running_total
+FROM events
+GROUP BY device;
+```
+
+### Moving Averages
+
+```sql
+SELECT window_start, device, avg(temperature) as moving_avg
+FROM tumble(sensor_data, 1m)
+GROUP BY window_start, device;
+```
+
+### Count Distinct Users
+
+```sql
+SELECT window_start, uniq(user_id) as unique_users
+FROM tumble(page_views, 1h)
+GROUP BY window_start;
+```
+
+### Top K Items
+
+```sql
+SELECT window_start, topK(10)(product_id) as top_products
+FROM tumble(purchases, 1d)
+GROUP BY window_start;
+```
+
+### Statistical Analysis
+
+```sql
+SELECT 
+    window_start,
+    avg(response_time) as avg_rt,
+    quantile(0.5)(response_time) as median_rt,
+    quantile(0.95)(response_time) as p95_rt,
+    quantile(0.99)(response_time) as p99_rt,
+    stddev(response_time) as stddev_rt
+FROM tumble(requests, 5m)
+GROUP BY window_start;
+```
+
+## See Also
+
+- [Window Functions](/sql/functions/window) - Time-based windowing for aggregations
+- [Functions Overview](/sql/functions/overview) - All function categories
+- [Time Functions](/sql/functions/time) - Working with timestamps in aggregations

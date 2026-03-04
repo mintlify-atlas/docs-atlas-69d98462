@@ -1,0 +1,557 @@
+---
+title: Performance Tuning
+description: Optimize Timeplus Proton for maximum performance
+---
+
+Timeplus Proton is designed for high-performance stream processing. This guide covers optimization techniques to achieve maximum throughput and minimum latency.
+
+## Performance Characteristics
+
+Timeplus Proton delivers exceptional performance:
+
+- **Throughput**: Up to **90 million events per second** (EPS) on modern hardware
+- **Latency**: As low as **4 milliseconds** end-to-end latency
+- **Cardinality**: Handles **1 million unique keys** in aggregations
+- **Resource Efficient**: Runs on as little as 0.5 GB RAM (AWS t2.nano)
+
+*Benchmark: Apple MacBook Pro with M2 Max processor*
+
+## Memory Optimization
+
+### Memory Configuration
+
+Configure memory limits based on available RAM:
+
+```yaml
+# config.yaml
+
+# Use up to 90% of total RAM
+max_server_memory_usage_to_ram_ratio: 0.9
+
+# Cache up to 50% of RAM
+cache_size_to_ram_max_ratio: 0.5
+
+# Mark cache (index cache)
+mark_cache_size: 5368709120  # 5 GB
+
+# Uncompressed block cache
+uncompressed_cache_size: 8589934592  # 8 GB
+
+# Primary key cache
+primary_key_cache_size: 5368709120  # 5 GB
+```
+
+### Memory Limit Recommendations
+
+| RAM Available | max_server_memory | mark_cache | uncompressed_cache |
+|---------------|-------------------|------------|--------------------|
+| 4 GB          | 0.7               | 512 MB     | 1 GB               |
+| 8 GB          | 0.8               | 1 GB       | 2 GB               |
+| 16 GB         | 0.85              | 2 GB       | 4 GB               |
+| 32 GB         | 0.9               | 5 GB       | 8 GB               |
+| 64 GB+        | 0.9               | 10 GB      | 16 GB              |
+
+### Per-Query Memory Limits
+
+Configure in `users.yaml`:
+
+```yaml
+profiles:
+  default:
+    max_memory_usage: 10000000000  # 10 GB per query
+    max_memory_usage_for_user: 20000000000  # 20 GB per user
+    
+  low_memory:
+    max_memory_usage: 1000000000   # 1 GB per query
+```
+
+### Monitor Memory Usage
+
+```sql
+-- Current memory usage
+SELECT 
+    formatReadableSize(value) AS memory_used
+FROM system.asynchronous_metrics
+WHERE metric = 'jemalloc.allocated';
+
+-- Memory by query
+SELECT 
+    query_id,
+    user,
+    formatReadableSize(memory_usage) AS memory,
+    query
+FROM system.processes
+ORDER BY memory_usage DESC;
+```
+
+## CPU Optimization
+
+### Thread Pool Configuration
+
+Optimize thread pools for your CPU core count:
+
+```yaml
+# config.yaml
+
+# Background processing (set to CPU cores)
+background_pool_size: 16
+background_merge_pool_size: 16
+
+# Data fetching threads
+background_fetches_pool_size: 8
+
+# Data movement between disks
+background_move_pool_size: 8
+
+# Scheduled tasks
+background_schedule_pool_size: 128
+
+# Streaming query processing
+streaming_processing_pool_size: 100
+```
+
+### Thread Pool Sizing Guidelines
+
+| CPU Cores | background_pool | merge_pool | streaming_pool |
+|-----------|-----------------|------------|----------------|
+| 2-4       | 4               | 4          | 50             |
+| 8         | 8               | 8          | 100            |
+| 16        | 16              | 16         | 200            |
+| 32+       | 32              | 32         | 300            |
+
+### CPU Affinity
+
+For dedicated servers, pin Proton to specific CPU cores:
+
+```bash
+# Linux: Use taskset
+taskset -c 0-15 proton server
+
+# Or in systemd service
+[Service]
+CPUAffinity=0-15
+```
+
+### SIMD Optimization
+
+Proton uses SIMD instructions for performance. Ensure your CPU supports:
+
+- **x86_64**: AVX2 (minimum), AVX-512 (optimal)
+- **ARM**: NEON (included in ARM64)
+
+Verify SIMD support:
+
+```sql
+SELECT * FROM system.build_options 
+WHERE name LIKE '%SIMD%' OR name LIKE '%AVX%';
+```
+
+## Query Concurrency Tuning
+
+### Concurrent Query Limits
+
+```yaml
+# config.yaml
+
+# Overall limits
+max_concurrent_queries: 100
+
+# By query type
+max_concurrent_select_queries: 100
+max_concurrent_insert_queries: 100
+
+# Streaming queries
+streaming_processing_pool_size: 100
+```
+
+### Environment Variable Override
+
+```bash
+docker run -d \
+  -e MAX_CONCURRENT_QUERIES=200 \
+  -e MAX_CONCURRENT_STREAMING_QUERIES=150 \
+  d.timeplus.com/timeplus-io/proton:latest
+```
+
+### Adjust Based on Workload
+
+- **High read throughput**: Increase `max_concurrent_select_queries`
+- **High write throughput**: Increase `max_concurrent_insert_queries`
+- **Many streaming queries**: Increase `streaming_processing_pool_size`
+- **Limited resources**: Reduce all limits to prevent overload
+
+## Storage Optimization
+
+### Disk Selection
+
+- **Best**: NVMe SSD for data and checkpoints
+- **Good**: SATA SSD for data, separate disk for checkpoints
+- **Minimum**: SSD (avoid HDD for production)
+
+### Data Path Configuration
+
+```yaml
+# Separate data and temporary paths
+path: /data/proton/
+tmp_path: /tmp/proton/
+
+# Use fast storage for checkpoints
+query_state_checkpoint:
+  path: /nvme/proton/checkpoint/
+
+# Separate disk for logs
+logger:
+  log: /logs/proton/proton-server.log
+```
+
+### Compression Settings
+
+Balance compression ratio vs. CPU usage:
+
+```sql
+-- Create table with compression
+CREATE STREAM events (
+  timestamp datetime64(3),
+  user_id string,
+  event_type string,
+  payload string
+)
+ENGINE = Stream
+SETTINGS 
+  codec = 'ZSTD(1)',  -- Fast compression (levels 1-22)
+  min_compress_block_size = 65536;
+```
+
+Compression levels:
+- **ZSTD(1)**: Fastest, lower compression
+- **ZSTD(3)**: Balanced (recommended)
+- **ZSTD(9)**: Higher compression, slower
+- **LZ4**: Faster than ZSTD, lower ratio
+
+## Network Optimization
+
+### TCP Settings
+
+```yaml
+# config.yaml
+
+# Connection pooling
+max_connections: 4096
+keep_alive_timeout: 3
+
+# TCP keep-alive
+tcp_keep_alive_timeout: 30
+
+# Send/receive buffer sizes (bytes)
+max_network_bandwidth: 1000000000  # 1 Gbps
+max_network_bandwidth_for_user: 1000000000
+```
+
+### Kafka/Redpanda Tuning
+
+Optimize external stream storage:
+
+```yaml
+stream_storage:
+  kafka:
+    enabled: true
+    brokers: kafka:9092
+    
+    # Producer latency control
+    queue_buffering_max_ms: 50    # Lower = lower latency
+    batch_size: 1048576           # 1 MB batches
+    
+    # Consumer settings
+    fetch_wait_max_ms: 500        # Max wait for data
+    fetch_min_bytes: 1            # Fetch immediately
+    fetch_max_bytes: 52428800     # 50 MB max fetch
+    
+    # Parallelism
+    num_consumers: 8              # Consumer threads
+```
+
+### Latency vs. Throughput Tradeoff
+
+**For minimum latency** (< 10ms):
+```yaml
+queue_buffering_max_ms: 10
+fetch_wait_max_ms: 100
+batch_size: 16384  # Smaller batches
+```
+
+**For maximum throughput**:
+```yaml
+queue_buffering_max_ms: 100
+fetch_wait_max_ms: 500
+batch_size: 1048576  # Larger batches
+```
+
+## Checkpoint Optimization
+
+For stateful streaming queries:
+
+```yaml
+query_state_checkpoint:
+  path: /nvme/proton/checkpoint/
+  
+  # Auto-tune checkpoint intervals
+  interval: 0  # Auto mode
+  
+  # Lightweight state (ETL)
+  light_state_interval: 5          # 5 seconds
+  
+  # Heavy state (large aggregations)
+  heavy_state_interval: 900        # 15 minutes
+  heavy_state_size_threshold: 524288000  # 500 MB
+  
+  # Minimize checkpoint overhead
+  log_flush_interval_entries: 10   # Batch log writes
+  log_segment_size: 2147483648     # 2 GB segments
+```
+
+### Checkpoint Best Practices
+
+1. **Use fast storage** (NVMe) for checkpoint directory
+2. **Tune intervals** based on state size
+3. **Monitor checkpoint latency** in query logs
+4. **Clean up old checkpoints** via TTL settings
+5. **Separate checkpoint disk** from data disk if possible
+
+## Streaming Query Optimization
+
+### Window Function Tuning
+
+Optimize tumble/hop/session windows:
+
+```sql
+-- Use smaller window intervals for lower latency
+SELECT 
+  window_start,
+  count(*) AS event_count
+FROM tumble(events, 5s)  -- 5-second windows
+GROUP BY window_start;
+
+-- For high cardinality aggregations
+SELECT 
+  window_start,
+  user_id,
+  count(*) AS events
+FROM tumble(events, 1m)
+GROUP BY window_start, user_id
+SETTINGS 
+  max_memory_usage = 20000000000;  -- Allocate more memory
+```
+
+### Materialized View Optimization
+
+```sql
+-- Optimize materialized view refresh
+CREATE MATERIALIZED VIEW user_stats
+ENGINE = SummingMergeTree()
+ORDER BY (user_id, date)
+SETTINGS 
+  index_granularity = 8192,        -- Default, good for most
+  merge_max_block_size = 8192,     -- Merge block size
+  min_bytes_for_wide_part = 10485760  -- 10 MB for wide format
+AS SELECT 
+  user_id,
+  to_date(timestamp) AS date,
+  count(*) AS event_count
+FROM events
+GROUP BY user_id, date;
+```
+
+### Avoid Common Pitfalls
+
+1. **Don't use `SELECT *`** - specify only needed columns
+2. **Avoid unbounded state** - use time windows
+3. **Limit JOIN complexity** - pre-aggregate when possible
+4. **Use appropriate data types** - smaller types = better performance
+5. **Partition large tables** - by date or other key
+
+## Scaling Strategies
+
+### Vertical Scaling
+
+1. **Add more RAM** - improves caching and query parallelism
+2. **Upgrade CPU** - faster cores with AVX-512
+3. **Use NVMe storage** - reduces I/O bottlenecks
+4. **Increase network bandwidth** - for Kafka integration
+
+### Horizontal Scaling Patterns
+
+#### Pattern 1: Dedicated Compute Nodes
+
+```
+┌──────────────┐
+│ Proton Node 1├──┐
+│ (Compute)    │  │     ┌─────────┐
+└──────────────┘  ├────►│  Kafka  │
+┌──────────────┐  │     └─────────┘
+│ Proton Node 2├──┘
+│ (Compute)    │
+└──────────────┘
+```
+
+Each node processes different streams independently.
+
+#### Pattern 2: Topic Partitioning
+
+Partition Kafka topics and assign partitions to different Proton instances:
+
+```sql
+-- Node 1: Partitions 0-3
+CREATE EXTERNAL STREAM events_node1
+SETTINGS 
+  type='kafka',
+  brokers='kafka:9092',
+  topic='events',
+  partitions='0,1,2,3';
+
+-- Node 2: Partitions 4-7
+CREATE EXTERNAL STREAM events_node2
+SETTINGS 
+  type='kafka',
+  brokers='kafka:9092',
+  topic='events',
+  partitions='4,5,6,7';
+```
+
+### Load Balancing
+
+Use a load balancer for query distribution:
+
+```
+         ┌─────────────┐
+         │Load Balancer│
+         └──────┬──────┘
+         ┌──────┴──────┐
+    ┌────▼───┐    ┌────▼───┐
+    │Proton 1│    │Proton 2│
+    └────────┘    └────────┘
+```
+
+## Performance Monitoring
+
+### Key Metrics to Track
+
+```sql
+-- Query throughput
+SELECT 
+  count(*) / 60 AS queries_per_second
+FROM system.query_log
+WHERE query_start_time >= now() - INTERVAL 1 MINUTE;
+
+-- Average query latency
+SELECT 
+  avg(query_duration_ms) AS avg_latency_ms,
+  quantile(0.95)(query_duration_ms) AS p95_latency_ms
+FROM system.query_log
+WHERE query_start_time >= now() - INTERVAL 5 MINUTE
+  AND type = 'QueryFinish';
+
+-- Memory efficiency
+SELECT 
+  formatReadableSize(value) AS memory_used,
+  round(value / (SELECT value FROM system.asynchronous_metrics 
+                 WHERE metric = 'OSMemoryTotal') * 100, 2) AS memory_pct
+FROM system.asynchronous_metrics
+WHERE metric = 'jemalloc.allocated';
+```
+
+### Benchmark Your Configuration
+
+```sql
+-- Create test stream
+CREATE RANDOM STREAM perf_test (
+  id uint64 DEFAULT rand64(),
+  timestamp datetime64(3) DEFAULT now64(3),
+  value float64 DEFAULT rand() / 1000
+);
+
+-- Test aggregation performance
+SELECT 
+  window_start,
+  count(*) AS events,
+  avg(value) AS avg_value
+FROM tumble(perf_test, 1s)
+GROUP BY window_start;
+
+-- Measure throughput
+SELECT count(*) FROM perf_test;
+```
+
+## Performance Troubleshooting
+
+### Slow Queries
+
+```sql
+-- Find slow queries
+SELECT 
+  query,
+  query_duration_ms,
+  memory_usage,
+  read_rows
+FROM system.query_log
+WHERE query_duration_ms > 5000
+ORDER BY query_duration_ms DESC
+LIMIT 10;
+```
+
+**Common fixes:**
+- Add indexes on filter columns
+- Reduce data scanned (use time filters)
+- Increase `max_memory_usage`
+- Optimize JOIN order
+
+### High Memory Usage
+
+```sql
+-- Identify memory-intensive queries
+SELECT 
+  query_id,
+  user,
+  formatReadableSize(memory_usage) AS memory,
+  query
+FROM system.processes
+ORDER BY memory_usage DESC;
+```
+
+**Solutions:**
+- Reduce query concurrency
+- Decrease cache sizes
+- Lower `max_memory_usage_to_ram_ratio`
+- Add more RAM
+
+### Low Throughput
+
+**Diagnose:**
+1. Check CPU utilization
+2. Monitor disk I/O wait
+3. Verify network bandwidth
+4. Review query complexity
+
+**Optimize:**
+- Increase thread pool sizes
+- Use faster storage
+- Batch smaller queries
+- Scale horizontally
+
+## Performance Best Practices
+
+1. **Right-size memory allocation** - 70-90% of available RAM
+2. **Use fast storage** - NVMe SSD for production
+3. **Optimize thread pools** - match CPU core count
+4. **Monitor query performance** - track p95/p99 latency
+5. **Tune Kafka settings** - balance latency vs. throughput
+6. **Checkpoint on fast disks** - reduce state overhead
+7. **Use appropriate data types** - smaller = faster
+8. **Partition large tables** - improve query pruning
+9. **Limit query complexity** - simpler queries perform better
+10. **Scale horizontally** - when vertical limits reached
+
+## Next Steps
+
+- Set up comprehensive [Monitoring](/operations/monitoring)
+- Review [Configuration](/operations/configuration) settings
+- Plan your [Deployment](/operations/deployment) architecture

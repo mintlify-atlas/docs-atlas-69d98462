@@ -1,0 +1,539 @@
+---
+title: 'Data Types'
+description: 'Complete reference for data types in Timeplus Proton'
+---
+
+Timeplus Proton supports a comprehensive set of data types compatible with ClickHouse. This page provides a complete reference for all available data types, their usage, and examples.
+
+## Numeric Types
+
+### Integer Types
+
+Fixed-length integers with or without a sign.
+
+#### Signed Integers
+
+- `int8` — Range: [-128 : 127]
+- `int16` — Range: [-32768 : 32767]
+- `int32` — Range: [-2147483648 : 2147483647]
+- `int64` — Range: [-9223372036854775808 : 9223372036854775807]
+- `int128` — Range: [-170141183460469231731687303715884105728 : 170141183460469231731687303715884105727]
+- `int256` — Range: [-57896044618658097711785492504343953926634992332820282019728792003956564819968 : 57896044618658097711785492504343953926634992332820282019728792003956564819967]
+
+**Aliases:**
+- `int8` — `TINYINT`, `BOOL`, `BOOLEAN`, `INT1`
+- `int16` — `SMALLINT`, `INT2`
+- `int32` — `INT`, `INT4`, `INTEGER`
+- `int64` — `BIGINT`
+
+**Example:**
+```sql
+CREATE STREAM temperature_readings (
+    sensor_id int32,
+    temperature int16,
+    timestamp datetime
+);
+
+INSERT INTO temperature_readings VALUES (101, 72, now());
+```
+
+#### Unsigned Integers
+
+- `uint8` — Range: [0 : 255]
+- `uint16` — Range: [0 : 65535]
+- `uint32` — Range: [0 : 4294967295]
+- `uint64` — Range: [0 : 18446744073709551615]
+- `uint128` — Range: [0 : 340282366920938463463374607431768211455]
+- `uint256` — Range: [0 : 115792089237316195423570985008687907853269984665640564039457584007913129639935]
+
+**Example:**
+```sql
+CREATE STREAM user_events (
+    user_id uint64,
+    event_count uint32,
+    timestamp datetime
+);
+```
+
+### Floating Point Types
+
+- `float32` — 32-bit floating point number (IEEE 754 single precision)
+- `float64` — 64-bit floating point number (IEEE 754 double precision)
+
+**Aliases:**
+- `float32` — `FLOAT`, `REAL`, `SINGLE`
+- `float64` — `DOUBLE`, `DOUBLE PRECISION`
+
+**Example:**
+```sql
+CREATE STREAM sensor_data (
+    sensor_id int32,
+    measurement float64,
+    precision_value float32,
+    timestamp datetime
+);
+
+INSERT INTO sensor_data VALUES (1, 23.456789, 23.45, now());
+```
+
+### Decimal Types
+
+Fixed-precision decimal numbers. Syntax: `decimal(P, S)` where P is precision (total digits) and S is scale (decimal places).
+
+- `decimal32(S)` — Precision up to 9 digits
+- `decimal64(S)` — Precision up to 18 digits
+- `decimal128(S)` — Precision up to 38 digits
+- `decimal256(S)` — Precision up to 76 digits
+
+**Example:**
+```sql
+CREATE STREAM financial_transactions (
+    transaction_id uint64,
+    amount decimal(18, 2),  -- Up to 16 digits before decimal, 2 after
+    fee decimal(10, 4),
+    timestamp datetime
+);
+
+INSERT INTO financial_transactions VALUES (1, 1234.56, 0.0025, now());
+```
+
+## String Types
+
+### String
+
+Variable-length strings with no size limit. Can contain arbitrary bytes including null bytes.
+
+**Aliases:** `LONGTEXT`, `MEDIUMTEXT`, `TINYTEXT`, `TEXT`, `LONGBLOB`, `MEDIUMBLOB`, `TINYBLOB`, `BLOB`, `VARCHAR`, `CHAR`
+
+**Example:**
+```sql
+CREATE STREAM user_messages (
+    user_id uint64,
+    message string,
+    timestamp datetime
+);
+
+INSERT INTO user_messages VALUES (1, 'Hello, Timeplus!', now());
+```
+
+### Fixed String
+
+Fixed-length strings. Syntax: `fixed_string(N)` where N is the string length in bytes.
+
+- Strings shorter than N are padded with null bytes
+- Strings longer than N cause an error
+- Maximum size: 0xFFFFFF (16,777,215 bytes)
+
+**Example:**
+```sql
+CREATE STREAM device_codes (
+    device_id uint64,
+    code fixed_string(8),  -- Always 8 bytes
+    timestamp datetime
+);
+
+INSERT INTO device_codes VALUES (1, 'ABC12345', now());
+```
+
+## Date and Time Types
+
+### Date
+
+Stores calendar dates (year, month, day).
+
+- **Storage:** 2 bytes (as uint16)
+- **Range:** [1970-01-01 : 2149-06-06]
+- **Resolution:** 1 day
+- **Format:** YYYY-MM-DD
+
+**Example:**
+```sql
+CREATE STREAM daily_summary (
+    report_date date,
+    total_events uint64
+);
+
+INSERT INTO daily_summary VALUES ('2024-03-15', 1000);
+INSERT INTO daily_summary VALUES (to_date('2024-03-16'), 1500);
+```
+
+### Date32
+
+Extended date type with wider range.
+
+- **Storage:** 4 bytes (as int32)
+- **Range:** [1900-01-01 : 2299-12-31]
+- **Resolution:** 1 day
+- **Format:** YYYY-MM-DD
+
+**Example:**
+```sql
+CREATE STREAM historical_data (
+    event_date date32,
+    value int64
+);
+
+INSERT INTO historical_data VALUES ('1950-01-01', 100);
+```
+
+### DateTime
+
+Stores timestamp as Unix time (seconds since epoch).
+
+**Syntax:** `datetime([timezone])`
+
+- **Storage:** 4 bytes (as uint32)
+- **Range:** [1970-01-01 00:00:00 : 2105-12-31 23:59:59]
+- **Resolution:** 1 second
+- **Format:** YYYY-MM-DD hh:mm:ss
+
+**Example:**
+```sql
+CREATE STREAM events (
+    event_id uint64,
+    event_time datetime,
+    event_time_utc datetime('UTC'),
+    event_time_ny datetime('America/New_York')
+);
+
+INSERT INTO events VALUES (1, now(), now(), now());
+INSERT INTO events VALUES (2, '2024-03-15 14:30:00', '2024-03-15 14:30:00', '2024-03-15 14:30:00');
+```
+
+**Timezone Behavior:**
+- Timezone only affects text format parsing and display
+- Internal storage is always Unix timestamp (UTC)
+- Timezone conversion has no computation cost (metadata only)
+
+### DateTime64
+
+High-precision timestamp with sub-second resolution.
+
+**Syntax:** `datetime64(precision, [timezone])`
+
+- **Storage:** 8 bytes (as int64)
+- **Precision:** 0-9 decimal places (default: 3 for milliseconds)
+- **Format:** YYYY-MM-DD hh:mm:ss.sss
+
+**Example:**
+```sql
+CREATE STREAM high_frequency_trades (
+    trade_id uint64,
+    trade_time datetime64(3),        -- Millisecond precision
+    trade_time_micro datetime64(6),  -- Microsecond precision
+    trade_time_nano datetime64(9),   -- Nanosecond precision
+    price decimal(18, 8)
+);
+
+INSERT INTO high_frequency_trades VALUES 
+    (1, '2024-03-15 14:30:15.123', '2024-03-15 14:30:15.123456', '2024-03-15 14:30:15.123456789', 100.5);
+```
+
+## Complex Types
+
+### Array
+
+Dynamic array of elements of the same type.
+
+**Syntax:** `array(T)` where T is any data type
+
+- Maximum size: 1 million elements
+- Supports nested arrays
+- Elements must be of the same type
+
+**Example:**
+```sql
+CREATE STREAM user_sessions (
+    user_id uint64,
+    page_views array(string),
+    click_times array(datetime),
+    scores array(float64)
+);
+
+INSERT INTO user_sessions VALUES 
+    (1, ['home', 'products', 'checkout'], [now(), now(), now()], [1.5, 2.3, 4.1]);
+
+-- Using array() function
+SELECT array(1, 2, 3) AS numbers;
+
+-- Using bracket notation
+SELECT [1, 2, 3] AS numbers;
+
+-- Nested arrays
+SELECT [[1, 2], [3, 4]] AS matrix;
+```
+
+**Array Operations:**
+```sql
+-- Access elements (1-based indexing)
+SELECT page_views[1] FROM user_sessions;
+
+-- Array size
+SELECT length(page_views) FROM user_sessions;
+
+-- Check if element exists
+SELECT has(page_views, 'home') FROM user_sessions;
+```
+
+### Tuple
+
+Ordered collection of elements with individual types.
+
+**Syntax:** `tuple(T1, T2, ...)` or `tuple(name1 T1, name2 T2, ...)`
+
+- Elements can have different types
+- Can be named or unnamed
+- Used for temporary column grouping
+
+**Example:**
+```sql
+CREATE STREAM user_locations (
+    user_id uint64,
+    coordinates tuple(float64, float64),
+    location tuple(city string, country string, zip_code int32)
+);
+
+INSERT INTO user_locations VALUES 
+    (1, (37.7749, -122.4194), ('San Francisco', 'USA', 94102));
+
+-- Creating tuples
+SELECT tuple(1, 'a', 3.14) AS my_tuple;
+SELECT (1, 'a', 3.14) AS my_tuple;  -- Alternative syntax
+
+-- Accessing named tuple elements
+SELECT location.city, location.country FROM user_locations;
+
+-- Accessing by index
+SELECT coordinates.1, coordinates.2 FROM user_locations;
+```
+
+### Map
+
+Key-value pair storage.
+
+**Syntax:** `map(K, V)` where K is the key type and V is the value type
+
+- Keys can be any type except nullable or low cardinality nullable
+- Values can be any type
+- Maps can contain duplicate keys (internally `array(tuple(K, V))`)
+- Non-unique keys allowed
+
+**Example:**
+```sql
+CREATE STREAM user_preferences (
+    user_id uint64,
+    settings map(string, string),
+    feature_flags map(string, bool),
+    scores map(string, uint32)
+);
+
+INSERT INTO user_preferences VALUES 
+    (1, {'theme': 'dark', 'language': 'en'}, {'beta': true, 'advanced': false}, {'points': 100, 'level': 5});
+
+-- Access map values
+SELECT settings['theme'] FROM user_preferences;
+
+-- Check if key exists
+SELECT map_contains(settings, 'theme') FROM user_preferences;
+
+-- Get all keys and values
+SELECT map_keys(settings), map_values(settings) FROM user_preferences;
+```
+
+### JSON
+
+<Note>
+The `JSON` object type is deprecated in Timeplus Proton. For working with JSON data, use one of these approaches:
+- Store as `string` type and use JSON functions for parsing
+- Use `map(string, string)` for simple key-value JSON
+- Parse into strongly-typed columns using JSON functions
+</Note>
+
+**Example: Working with JSON data:**
+```sql
+-- Store JSON as string
+CREATE STREAM json_events (
+    event_id uint64,
+    json_data string,
+    timestamp datetime
+);
+
+INSERT INTO json_events VALUES 
+    (1, '{"user": "alice", "action": "login", "ip": "192.168.1.1"}', now());
+
+-- Extract JSON fields
+SELECT 
+    json_extract_string(json_data, 'user') AS user,
+    json_extract_string(json_data, 'action') AS action
+FROM json_events;
+```
+
+## Nullable Types
+
+Wraps any base type to allow NULL values.
+
+**Syntax:** `nullable(T)` where T is any data type
+
+- Adds special NULL marker alongside normal values
+- Cannot be used in table indexes
+- Adds storage overhead (separate NULL mask file)
+- Performance impact: almost always negative
+- Default value for nullable type is NULL
+
+**Restrictions:**
+- Cannot wrap `array` or `tuple` directly
+- Can wrap elements: `array(nullable(int32))` is valid
+- `nullable(array(int32))` is invalid
+
+**Example:**
+```sql
+CREATE STREAM user_profiles (
+    user_id uint64,
+    email string,
+    phone nullable(string),      -- Phone is optional
+    age nullable(uint8),          -- Age is optional
+    last_login nullable(datetime) -- Last login is optional
+);
+
+INSERT INTO user_profiles VALUES (1, 'user@example.com', NULL, 25, now());
+INSERT INTO user_profiles VALUES (2, 'user2@example.com', '+1234567890', NULL, NULL);
+
+-- Check for NULL values
+SELECT * FROM user_profiles WHERE phone IS NULL;
+SELECT * FROM user_profiles WHERE age IS NOT NULL;
+
+-- Using null subcolumn
+SELECT phone.null FROM user_profiles;  -- Returns 1 for NULL, 0 otherwise
+```
+
+## Type Conversion
+
+### Implicit Conversion
+
+Timeplus Proton automatically converts between compatible types in many situations.
+
+**Example:**
+```sql
+-- Integer to larger integer
+SELECT to_uint64(123::uint8);
+
+-- Integer to float
+SELECT 42::float64;
+
+-- String to number (in INSERT)
+INSERT INTO sensor_data (sensor_id, value) VALUES ('123', '45.6');
+```
+
+### Explicit Conversion
+
+Use `CAST` or conversion functions for explicit type conversion.
+
+**CAST Syntax:**
+```sql
+-- CAST function
+SELECT CAST(x AS T);
+
+-- :: operator (PostgreSQL style)
+SELECT x::T;
+```
+
+**Common Conversion Functions:**
+
+```sql
+-- To integer types
+SELECT to_int8('123'), to_uint64('456');
+
+-- To floating point
+SELECT to_float32('3.14'), to_float64('2.718');
+
+-- To string
+SELECT to_string(123), to_string(3.14);
+
+-- To date/time
+SELECT to_date('2024-03-15');
+SELECT to_datetime('2024-03-15 14:30:00');
+SELECT to_datetime64('2024-03-15 14:30:15.123', 3);
+
+-- To array
+SELECT to_array([1, 2, 3]);
+
+-- Type name inspection
+SELECT to_type_name(x);
+```
+
+**Complete Conversion Example:**
+```sql
+CREATE STREAM conversions (
+    str_value string,
+    int_value int32
+);
+
+INSERT INTO conversions VALUES ('123', 456);
+
+SELECT 
+    -- String to numeric
+    to_int32(str_value) AS str_to_int,
+    to_float64(str_value) AS str_to_float,
+    
+    -- Numeric to string
+    to_string(int_value) AS int_to_str,
+    
+    -- Numeric conversions
+    CAST(int_value AS float64) AS int_to_float,
+    int_value::uint64 AS int_to_uint,
+    
+    -- Get type names
+    to_type_name(str_value) AS str_type,
+    to_type_name(int_value) AS int_type
+FROM conversions;
+```
+
+### Decimal Conversions
+
+```sql
+-- Decimal to integer
+SELECT CAST(123.456::decimal(10,3) AS int32);  -- Result: 123
+
+-- Decimal to decimal (different precision)
+SELECT CAST(123.456::decimal(10,3) AS decimal(10,2));  -- Result: 123.46
+
+-- Float to decimal
+SELECT to_decimal64(3.14159, 2);  -- Result: 3.14
+
+-- Decimal to float
+SELECT CAST(123.45::decimal(10,2) AS float64);
+```
+
+## ClickHouse Compatibility
+
+Timeplus Proton maintains compatibility with ClickHouse data types:
+
+### Fully Compatible Types
+- All integer types (`int8` through `int256`, `uint8` through `uint256`)
+- Floating point types (`float32`, `float64`)
+- Decimal types (`decimal32`, `decimal64`, `decimal128`, `decimal256`)
+- String types (`string`, `fixed_string`)
+- Date types (`date`, `date32`, `datetime`, `datetime64`)
+- Complex types (`array`, `tuple`, `map`)
+- `nullable` wrapper type
+
+### Type Aliases
+Most ClickHouse type aliases are supported for compatibility:
+- SQL standard names: `INT`, `BIGINT`, `VARCHAR`, `DOUBLE`, etc.
+- MySQL-style names: `TINYINT`, `TEXT`, `BLOB`, etc.
+
+### Best Practices
+
+1. **Choose appropriate precision**: Use the smallest integer type that fits your data range
+2. **Avoid nullable when possible**: Nullable types have performance overhead
+3. **Use appropriate string types**: Use `fixed_string` for fixed-width codes, `string` for variable content
+4. **Consider timezone handling**: Always specify timezone for datetime types when dealing with multi-region data
+5. **Array size limits**: Keep arrays under 1 million elements
+6. **Decimal vs Float**: Use `decimal` for financial data, `float` for scientific measurements
+
+## See Also
+
+- [Type Conversion Functions](/sql/functions/overview)
+- [Date and Time Functions](/sql/functions/time)
+- [Array Functions](/sql/functions/overview)
+- [String Functions](/sql/functions/overview)

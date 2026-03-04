@@ -1,0 +1,333 @@
+---
+title: ClickHouse Integration
+description: Read from and write to ClickHouse using External Tables
+---
+
+Timeplus Proton can read from and write to ClickHouse databases using External Tables. This enables powerful streaming ETL pipelines that combine real-time processing with analytical storage.
+
+## CREATE EXTERNAL TABLE
+
+Create an external table to connect to ClickHouse:
+
+```sql
+CREATE EXTERNAL TABLE table_name
+SETTINGS
+  type='clickhouse',
+  address='host:port',
+  table='table_name';
+```
+
+### Basic Example
+
+```sql
+CREATE EXTERNAL TABLE ch_events
+SETTINGS
+  type='clickhouse',
+  address='localhost:9000',
+  table='events';
+```
+
+## Configuration Options
+
+### Required Settings
+
+| Setting | Type | Description |
+|---------|------|-------------|
+| `type` | String | Must be 'clickhouse' |
+| `address` | String | ClickHouse host and native port (format: `host:port`) |
+| `table` | String | Target table name in ClickHouse |
+
+### Authentication Settings
+
+| Setting | Type | Description | Default |
+|---------|------|-------------|----------|
+| `user` | String | ClickHouse username | (empty) |
+| `password` | String | ClickHouse password | (empty) |
+| `database` | String | ClickHouse database name | default |
+
+### Connection Settings
+
+| Setting | Type | Description | Default |
+|---------|------|-------------|----------|
+| `secure` | Bool | Use TLS/SSL for connection | false |
+| `compression` | Bool | Enable compression | false |
+| `pooled_connections` | Int | Connection pool size | 16 |
+| `ssl_verify_mode` | String | SSL verification mode | (system default) |
+| `ssl_ca_cert_file` | String | Path to CA certificate | (empty) |
+| `ssl_cert_file` | String | Path to client certificate | (empty) |
+| `ssl_key_file` | String | Path to client private key | (empty) |
+
+## Reading from ClickHouse
+
+When you query an external table, Proton reads data from ClickHouse and processes it locally.
+
+### Simple Query
+
+```sql
+SELECT * FROM ch_events;
+```
+
+### Query with Filtering
+
+```sql
+SELECT * FROM ch_events WHERE timestamp > now() - INTERVAL 1 HOUR;
+```
+
+**Important**: Filters and aggregations are executed in Proton, not pushed down to ClickHouse. All matching rows are transferred from ClickHouse first.
+
+### Aggregation Example
+
+```sql
+SELECT
+  method,
+  count() AS cnt,
+  avg(response_time) AS avg_time
+FROM ch_events
+GROUP BY method;
+```
+
+## Writing to ClickHouse
+
+### INSERT Statement
+
+```sql
+INSERT INTO ch_events (timestamp, url, method, ip)
+VALUES (now(), '/api/users', 'GET', '192.168.1.1');
+```
+
+### Stream to ClickHouse with Materialized View
+
+A common pattern is to continuously write streaming data to ClickHouse:
+
+```sql
+-- Create external table for ClickHouse
+CREATE EXTERNAL TABLE ch_aggregates
+SETTINGS
+  type='clickhouse',
+  address='clickhouse:9000',
+  table='sensor_stats';
+
+-- Create materialized view to write continuously
+CREATE MATERIALIZED VIEW mv_to_ch INTO ch_aggregates AS
+  SELECT
+    window_start AS timestamp,
+    device,
+    avg(temperature) AS avg_temp,
+    min(temperature) AS min_temp,
+    max(temperature) AS max_temp
+  FROM tumble(sensor_stream, 1m)
+  GROUP BY window_start, device;
+```
+
+## Complete ETL Example
+
+Read from Kafka, transform, and write to ClickHouse:
+
+```sql
+-- Source: Kafka external stream
+CREATE EXTERNAL STREAM kafka_raw (
+  raw string
+)
+SETTINGS
+  type='kafka',
+  brokers='redpanda:9092',
+  topic='frontend-events';
+
+-- Destination: ClickHouse external table
+CREATE EXTERNAL TABLE ch_events
+SETTINGS
+  type='clickhouse',
+  address='clickhouse:9000',
+  table='events';
+
+-- ETL Pipeline: Extract, transform, and load
+CREATE MATERIALIZED VIEW mv_kafka_to_ch INTO ch_events AS
+  SELECT
+    now64() AS _tp_time,
+    raw:requestedUrl AS url,
+    raw:method AS method,
+    lower(hex(md5(raw:ipAddress))) AS ip
+  FROM kafka_raw;
+```
+
+## ClickHouse Table Setup
+
+Prepare your ClickHouse table before creating the external table in Proton:
+
+```sql
+-- Run this in ClickHouse
+CREATE TABLE events (
+  _tp_time DateTime64(3),
+  url String,
+  method String,
+  ip String
+)
+ENGINE = MergeTree()
+PARTITION BY toYYYYMM(_tp_time)
+ORDER BY (_tp_time, url);
+```
+
+## Secure Connection Example
+
+Connect to ClickHouse Cloud or other TLS-enabled instances:
+
+```sql
+CREATE EXTERNAL TABLE ch_cloud
+SETTINGS
+  type='clickhouse',
+  address='myinstance.clickhouse.cloud:9440',
+  user='default',
+  password='your_password',
+  secure=true,
+  database='production',
+  table='events';
+```
+
+## Aiven for ClickHouse Example
+
+```sql
+CREATE EXTERNAL TABLE ch_aiven
+SETTINGS
+  type='clickhouse',
+  address='abc.aivencloud.com:28851',
+  user='avnadmin',
+  password='your_password',
+  secure=true,
+  table='events';
+```
+
+## Schema Inference
+
+If you don't specify columns when creating the external table, Proton automatically fetches the schema from ClickHouse:
+
+```sql
+-- Schema will be fetched from ClickHouse automatically
+CREATE EXTERNAL TABLE ch_auto_schema
+SETTINGS
+  type='clickhouse',
+  address='localhost:9000',
+  table='my_table';
+
+-- Describe to see the inferred schema
+DESCRIBE ch_auto_schema;
+```
+
+## Default Values
+
+When inserting data, columns not specified in the INSERT or materialized view will use ClickHouse's default values:
+
+```sql
+-- ClickHouse table with defaults
+CREATE TABLE events (
+  timestamp DateTime64(3) DEFAULT now64(),
+  event_type String,
+  user_id UInt64,
+  metadata String DEFAULT '{}'
+) ENGINE = MergeTree() ORDER BY timestamp;
+
+-- Proton only sends specified columns
+INSERT INTO ch_events (event_type, user_id)
+VALUES ('click', 12345);
+-- timestamp and metadata will use ClickHouse defaults
+```
+
+## Multiple ClickHouse Targets
+
+You can write to multiple ClickHouse instances:
+
+```sql
+CREATE EXTERNAL TABLE ch_analytics
+SETTINGS type='clickhouse', address='analytics:9000', table='events';
+
+CREATE EXTERNAL TABLE ch_archive
+SETTINGS type='clickhouse', address='archive:9000', table='events_archive';
+
+-- Write to both
+CREATE MATERIALIZED VIEW mv_to_analytics INTO ch_analytics AS
+  SELECT * FROM source_stream;
+
+CREATE MATERIALIZED VIEW mv_to_archive INTO ch_archive AS
+  SELECT * FROM source_stream;
+```
+
+## Performance Considerations
+
+### Connection Pooling
+
+Adjust `pooled_connections` based on concurrency:
+
+```sql
+SETTINGS
+  pooled_connections=32  -- For high-concurrency scenarios
+```
+
+### Compression
+
+Enable compression for network efficiency:
+
+```sql
+SETTINGS
+  compression=true  -- Reduces network bandwidth
+```
+
+### Batch Writes
+
+Proton automatically batches writes to ClickHouse. The batch size is controlled by Proton's internal settings.
+
+## Error Handling
+
+### Connection Failures
+
+If ClickHouse is unavailable during external table creation:
+- With `attach=false` (CREATE): Connection is validated, creation fails
+- With `attach=true` (ATTACH): Validation is skipped
+
+### Write Failures
+
+If writes fail, the materialized view will retry or stop depending on error type. Check Proton logs for details.
+
+## Limitations
+
+1. **No predicate pushdown**: Filters are executed in Proton after fetching data
+2. **Full table scans**: Reading always fetches the entire result set matching the SELECT
+3. **No distributed tables**: Connect to a specific ClickHouse node
+4. **Native protocol only**: Uses ClickHouse native protocol (default port 9000/9440)
+
+## Best Practices
+
+1. **Use materialized views for continuous writes**: More efficient than individual INSERTs
+2. **Enable secure connections in production**: Use `secure=true` with proper certificates
+3. **Match data types**: Ensure Proton and ClickHouse column types are compatible
+4. **Optimize ClickHouse tables**: Use appropriate ENGINE, PARTITION, and ORDER BY
+5. **Monitor connection pool**: Adjust `pooled_connections` for workload
+
+## CDC to ClickHouse Example
+
+Stream database changes from MySQL (via Kafka) to ClickHouse:
+
+```sql
+-- Read CDC events from Kafka
+CREATE EXTERNAL STREAM customers_cdc (raw string)
+SETTINGS type='kafka', brokers='redpanda:9092', topic='dbserver1.inventory.customers';
+
+-- Write to ClickHouse
+CREATE EXTERNAL TABLE ch_customers
+SETTINGS type='clickhouse', address='clickhouse:9000', table='customers';
+
+-- Transform and load
+CREATE MATERIALIZED VIEW mv_cdc_to_ch INTO ch_customers AS
+  SELECT
+    raw:payload.after.id::int AS id,
+    raw:payload.after.first_name AS first_name,
+    raw:payload.after.last_name AS last_name,
+    raw:payload.after.email AS email
+  FROM customers_cdc
+  WHERE raw:payload.op IN ('c', 'u');  -- Create and Update operations
+```
+
+## Related Resources
+
+- [Kafka Integration](/integration/kafka)
+- [REST API](/integration/rest-api)
+- [Client Libraries](/integration/client-libraries)
+- [Docker and Testcontainers](https://docs.timeplus.com/tutorial-testcontainers-java) (external)

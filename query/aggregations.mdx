@@ -1,0 +1,502 @@
+---
+title: Streaming Aggregations
+description: Perform aggregations on streaming data in Timeplus Proton
+---
+
+Timeplus Proton supports both streaming and historical aggregations with standard SQL aggregate functions and streaming-specific semantics.
+
+## Basic Aggregations
+
+### COUNT
+
+Count events in a stream:
+
+```sql
+-- Count all events (streaming)
+SELECT count() as event_count
+FROM events;
+
+-- Count distinct users (historical)
+SELECT count(DISTINCT user_id) as unique_users
+FROM table(events)
+WHERE _tp_time > now() - INTERVAL 1 HOUR;
+```
+
+### SUM
+
+Sum numeric values:
+
+```sql
+-- Total transaction amount (streaming)
+SELECT sum(amount) as total_amount
+FROM transactions;
+
+-- Sum by group (historical)
+SELECT 
+  category,
+  sum(amount) as category_total
+FROM table(transactions)
+GROUP BY category;
+```
+
+### AVG
+
+Calculate average values:
+
+```sql
+-- Average temperature per device
+SELECT 
+  device_id,
+  avg(temperature) as avg_temp
+FROM sensor_readings
+GROUP BY device_id;
+```
+
+### MIN and MAX
+
+Find minimum and maximum values:
+
+```sql
+-- Min and max values per device (streaming)
+SELECT 
+  device_id,
+  min(temperature) as min_temp,
+  max(temperature) as max_temp
+FROM sensor_readings
+GROUP BY device_id;
+```
+
+## GROUP BY
+
+### Single Column Grouping
+
+```sql
+-- Events by type
+SELECT 
+  event_type,
+  count() as count
+FROM events
+GROUP BY event_type;
+```
+
+### Multiple Column Grouping
+
+```sql
+-- Events by type and user
+SELECT 
+  event_type,
+  user_id,
+  count() as count
+FROM events
+GROUP BY event_type, user_id;
+```
+
+### Grouping by Expressions
+
+```sql
+-- Group by date
+SELECT 
+  to_date(_tp_time) as event_date,
+  count() as daily_count
+FROM table(events)
+GROUP BY event_date;
+
+-- Group by hour
+SELECT 
+  to_hour(_tp_time) as hour,
+  count() as hourly_count
+FROM table(events)
+WHERE to_date(_tp_time) = today()
+GROUP BY hour
+ORDER BY hour;
+```
+
+## Streaming Aggregation Semantics
+
+### Continuous Aggregations
+
+Streaming aggregations update continuously:
+
+```sql
+-- Running count per category
+SELECT 
+  category,
+  count() as running_count
+FROM products
+GROUP BY category;
+```
+
+Characteristics:
+- Results update as new events arrive
+- Maintains state for each group
+- Emits incremental updates
+- Runs indefinitely
+
+### EMIT STREAM
+
+Control when aggregations emit results:
+
+```sql
+-- Emit periodic updates every 5 seconds
+SELECT 
+  device_id,
+  count() as event_count
+FROM events
+GROUP BY device_id
+EMIT STREAM PERIODIC INTERVAL 5 SECOND;
+```
+
+## Advanced Aggregate Functions
+
+### any() and any_last()
+
+Get arbitrary or latest value:
+
+```sql
+-- Get latest reading per device
+SELECT 
+  device_id,
+  any_last(temperature) as latest_temp,
+  max(_tp_time) as last_reading_time
+FROM table(sensor_readings)
+WHERE _tp_time > now() - INTERVAL 5 MINUTE
+GROUP BY device_id;
+```
+
+### uniq() for Approximate Distinct Count
+
+```sql
+-- Approximate unique users (faster than count distinct)
+SELECT 
+  event_type,
+  uniq(user_id) as approx_unique_users
+FROM events
+GROUP BY event_type;
+```
+
+### percentile() and quantile()
+
+```sql
+-- Calculate percentiles
+SELECT 
+  device_id,
+  quantile(0.5)(temperature) as median_temp,
+  quantile(0.95)(temperature) as p95_temp,
+  quantile(0.99)(temperature) as p99_temp
+FROM table(sensor_readings)
+GROUP BY device_id;
+```
+
+### topK() for Top Elements
+
+```sql
+-- Find top 10 products by count
+SELECT 
+  topK(10)(product_id) as top_products
+FROM table(orders)
+WHERE _tp_time > now() - INTERVAL 1 DAY;
+```
+
+## HAVING Clause
+
+Filter aggregated results:
+
+```sql
+-- Only show users with more than 10 events
+SELECT 
+  user_id,
+  count() as event_count
+FROM table(events)
+GROUP BY user_id
+HAVING count() > 10;
+
+-- Multiple conditions
+SELECT 
+  category,
+  sum(amount) as total,
+  avg(amount) as average
+FROM table(transactions)
+GROUP BY category
+HAVING sum(amount) > 1000 AND avg(amount) > 50;
+```
+
+## Window Aggregations
+
+See [Time Windows](/query/time-windows) for detailed window function documentation.
+
+### Tumbling Window Aggregation
+
+```sql
+-- 5-minute tumbling window aggregation
+SELECT 
+  device_id,
+  window_start,
+  window_end,
+  avg(temperature) as avg_temp,
+  count() as reading_count
+FROM tumble(sensor_readings, _tp_time, INTERVAL 5 MINUTE)
+GROUP BY device_id, window_start, window_end;
+```
+
+### Hopping Window Aggregation
+
+```sql
+-- 10-minute window, 2-minute hop
+SELECT 
+  window_start,
+  window_end,
+  count() as event_count
+FROM hop(events, _tp_time, INTERVAL 2 MINUTE, INTERVAL 10 MINUTE)
+GROUP BY window_start, window_end;
+```
+
+### Session Window Aggregation
+
+```sql
+-- Session window with 2-second gap
+SELECT 
+  user_id,
+  window_start,
+  window_end,
+  count() as events_in_session
+FROM session(user_events, _tp_time, 2s)
+PARTITION BY user_id
+GROUP BY user_id, window_start, window_end;
+```
+
+## Subquery Aggregations
+
+### Aggregation in Subqueries
+
+```sql
+-- Find users above average spend
+WITH user_totals AS (
+  SELECT 
+    user_id,
+    sum(amount) as total_spend
+  FROM table(transactions)
+  GROUP BY user_id
+)
+SELECT 
+  user_id,
+  total_spend
+FROM user_totals
+WHERE total_spend > (SELECT avg(total_spend) FROM user_totals);
+```
+
+### Nested Aggregations
+
+```sql
+-- Average of daily totals
+SELECT 
+  avg(daily_total) as avg_daily_total
+FROM (
+  SELECT 
+    to_date(_tp_time) as date,
+    sum(amount) as daily_total
+  FROM table(transactions)
+  GROUP BY date
+);
+```
+
+## Complete Aggregation Examples
+
+### Real-time Metrics Dashboard
+
+```sql
+-- Streaming metrics with multiple aggregations
+SELECT 
+  device_id,
+  count() as event_count,
+  avg(cpu_usage) as avg_cpu,
+  max(cpu_usage) as max_cpu,
+  avg(memory_usage) as avg_memory,
+  max(memory_usage) as max_memory
+FROM metrics
+GROUP BY device_id
+EMIT STREAM PERIODIC INTERVAL 10 SECOND;
+```
+
+### Hourly Transaction Summary
+
+```sql
+-- Historical hourly aggregation
+SELECT 
+  to_start_of_hour(_tp_time) as hour,
+  count() as transaction_count,
+  sum(amount) as total_amount,
+  avg(amount) as avg_amount,
+  min(amount) as min_amount,
+  max(amount) as max_amount,
+  count(DISTINCT user_id) as unique_users
+FROM table(transactions)
+WHERE _tp_time >= today() - INTERVAL 7 DAY
+GROUP BY hour
+ORDER BY hour DESC;
+```
+
+### Multi-level Aggregation
+
+```sql
+-- Category aggregation with window
+CREATE MATERIALIZED VIEW category_metrics_mv INTO category_metrics AS
+SELECT 
+  category,
+  window_start,
+  window_end,
+  count() as product_count,
+  sum(quantity) as total_quantity,
+  sum(quantity * price) as total_revenue
+FROM tumble(sales, sale_time, INTERVAL 1 HOUR)
+GROUP BY category, window_start, window_end
+EMIT STREAM;
+```
+
+### Top-K Analysis
+
+```sql
+-- Find top 10 users by transaction count and amount
+SELECT 
+  user_id,
+  count() as tx_count,
+  sum(amount) as total_amount,
+  avg(amount) as avg_amount
+FROM table(transactions)
+WHERE _tp_time > now() - INTERVAL 30 DAY
+GROUP BY user_id
+ORDER BY total_amount DESC
+LIMIT 10;
+```
+
+### Percentile Analysis
+
+```sql
+-- Response time percentiles per endpoint
+SELECT 
+  endpoint,
+  count() as request_count,
+  quantile(0.50)(response_time) as p50_ms,
+  quantile(0.90)(response_time) as p90_ms,
+  quantile(0.95)(response_time) as p95_ms,
+  quantile(0.99)(response_time) as p99_ms,
+  max(response_time) as max_ms
+FROM table(api_logs)
+WHERE _tp_time > now() - INTERVAL 1 HOUR
+GROUP BY endpoint
+ORDER BY request_count DESC;
+```
+
+### Windowed Aggregation with Filtering
+
+```sql
+-- High-value transaction windows
+SELECT 
+  window_start,
+  window_end,
+  count() as tx_count,
+  sum(amount) as total_amount
+FROM tumble(transactions, transaction_time, INTERVAL 5 MINUTE)
+WHERE amount > 1000
+GROUP BY window_start, window_end
+HAVING sum(amount) > 10000
+EMIT STREAM;
+```
+
+## Aggregation Performance
+
+### State Management
+
+Streaming aggregations maintain state:
+
+```sql
+-- High-cardinality grouping requires more memory
+SELECT 
+  user_id,        -- Could be millions of unique values
+  product_id,     -- Combined cardinality can be huge
+  count() as cnt
+FROM events
+GROUP BY user_id, product_id;
+```
+
+<Warning>
+High-cardinality GROUP BY keys can consume significant memory in streaming queries. Monitor state size and consider using windows or filters to limit cardinality.
+</Warning>
+
+### Optimizing Aggregations
+
+```sql
+-- Use approximate functions for better performance
+SELECT 
+  category,
+  uniq(user_id) as approx_unique_users  -- Faster than count(DISTINCT)
+FROM events
+GROUP BY category;
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose appropriate aggregation mode">
+    - Use streaming aggregations for real-time dashboards
+    - Use historical aggregations (with `table()`) for reports
+    - Consider EMIT STREAM for controlling update frequency
+  </Accordion>
+  
+  <Accordion title="Manage aggregation state">
+    For streaming aggregations:
+    - Limit GROUP BY cardinality
+    - Use time windows to bound state
+    - Monitor memory usage
+    - Consider approximate functions for high-cardinality data
+  </Accordion>
+  
+  <Accordion title="Use appropriate aggregate functions">
+    - `count()`: Exact count
+    - `uniq()`: Approximate distinct count (faster)
+    - `any_last()`: Get latest value efficiently
+    - `quantile()`: Percentile calculations
+  </Accordion>
+  
+  <Accordion title="Combine with time windows">
+    For time-series data, use window functions:
+    ```sql
+    SELECT 
+      device_id,
+      window_start,
+      avg(value) as avg_value
+    FROM tumble(metrics, timestamp, INTERVAL 1 MINUTE)
+    GROUP BY device_id, window_start, window_end;
+    ```
+  </Accordion>
+  
+  <Accordion title="Filter before aggregating">
+    Apply filters early to reduce aggregation scope:
+    ```sql
+    -- Good: Filter first
+    SELECT category, count()
+    FROM events
+    WHERE event_type = 'purchase'
+    GROUP BY category;
+    
+    -- Less efficient: Filter after
+    SELECT category, count()
+    FROM events
+    GROUP BY category, event_type
+    HAVING event_type = 'purchase';
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Time Windows" icon="clock" href="/query/time-windows">
+    Learn about windowed aggregations
+  </Card>
+  <Card title="Joins" icon="link" href="/query/joins">
+    Combine aggregations with joins
+  </Card>
+  <Card title="Materialized Views" icon="eye" href="/concepts/materialized-views">
+    Materialize aggregation results
+  </Card>
+</CardGroup>

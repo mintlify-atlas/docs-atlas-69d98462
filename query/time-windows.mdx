@@ -1,0 +1,528 @@
+---
+title: Time Windows
+description: Window functions for time-based aggregations in Timeplus Proton
+---
+
+Time windows enable temporal aggregations over streaming data, dividing continuous event streams into discrete time-based buckets.
+
+## Window Function Overview
+
+Timeplus Proton supports three types of time windows:
+
+- **Tumbling Windows** (`tumble`): Fixed-size, non-overlapping windows
+- **Hopping Windows** (`hop`): Fixed-size, overlapping windows with configurable slide
+- **Session Windows** (`session`): Dynamic windows based on activity gaps
+
+## Tumbling Windows
+
+### Basic Tumble Syntax
+
+Tumbling windows divide time into fixed, non-overlapping intervals:
+
+```sql
+tumble([table_name], [timestamp_column], [window_interval], [timezone])
+```
+
+### Simple Tumble Example
+
+```sql
+-- 5-minute tumbling windows
+SELECT 
+  window_start,
+  window_end,
+  count() as event_count
+FROM tumble(events, _tp_time, INTERVAL 5 MINUTE)
+GROUP BY window_start, window_end;
+```
+
+### Tumble with Grouping
+
+```sql
+-- Per-device 1-minute windows
+SELECT 
+  device_id,
+  window_start,
+  window_end,
+  avg(temperature) as avg_temp,
+  max(temperature) as max_temp,
+  count() as reading_count
+FROM tumble(sensor_readings, timestamp, INTERVAL 1 MINUTE)
+GROUP BY device_id, window_start, window_end;
+```
+
+### Tumble with Custom Timestamp
+
+```sql
+-- Use event_time instead of _tp_time
+SELECT 
+  window_start,
+  window_end,
+  sum(amount) as total_amount
+FROM tumble(transactions, event_time, INTERVAL 1 HOUR)
+GROUP BY window_start, window_end;
+```
+
+### Tumble Characteristics
+
+- Fixed window size (e.g., 1 minute, 5 minutes, 1 hour)
+- No overlap between windows
+- Each event belongs to exactly one window
+- Window boundaries align to time intervals
+
+```
+Time:     0s    5s    10s   15s   20s   25s
+Window 1: [-----)                          
+Window 2:       [-----)                    
+Window 3:             [-----)              
+Window 4:                   [-----)        
+Window 5:                         [-----)
+```
+
+## Hopping Windows
+
+### Basic Hop Syntax
+
+Hopping windows have fixed size but slide by a smaller interval:
+
+```sql
+hop([table_name], [timestamp_column], [hop_interval], [window_interval], [timezone])
+```
+
+Parameters:
+- `hop_interval`: How far each window slides
+- `window_interval`: Window size
+
+### Simple Hop Example
+
+```sql
+-- 10-minute windows, sliding every 2 minutes
+SELECT 
+  window_start,
+  window_end,
+  count() as event_count
+FROM hop(events, _tp_time, INTERVAL 2 MINUTE, INTERVAL 10 MINUTE)
+GROUP BY window_start, window_end;
+```
+
+### Hop with Aggregations
+
+```sql
+-- Sliding window metrics
+SELECT 
+  device_id,
+  window_start,
+  window_end,
+  avg(cpu_usage) as avg_cpu,
+  max(cpu_usage) as max_cpu
+FROM hop(metrics, timestamp, INTERVAL 30 SECOND, INTERVAL 5 MINUTE)
+GROUP BY device_id, window_start, window_end
+EMIT STREAM;
+```
+
+### Hop with emit_version()
+
+```sql
+-- Track window updates
+SELECT 
+  emit_version() as version,
+  device_id,
+  window_start,
+  window_end,
+  count() as event_count
+FROM hop(events, event_time, INTERVAL 3 SECOND, INTERVAL 5 SECOND)
+GROUP BY device_id, window_start, window_end
+EMIT STREAM;
+```
+
+### Hop Characteristics
+
+- Fixed window size
+- Windows overlap based on hop interval
+- Each event can belong to multiple windows
+- Useful for sliding calculations (moving averages, etc.)
+
+```
+Window size: 10s, Hop: 5s
+
+Time:     0s    5s    10s   15s   20s
+Window 1: [----------)
+Window 2:       [----------)
+Window 3:             [----------)
+Window 4:                   [----------)
+```
+
+## Session Windows
+
+### Basic Session Syntax
+
+Session windows group events separated by gaps of inactivity:
+
+```sql
+session([table_name], [timestamp_column], [gap_interval])
+PARTITION BY [partition_key]
+```
+
+### Simple Session Example
+
+```sql
+-- Sessions with 2-second inactivity gap
+SELECT 
+  user_id,
+  window_start,
+  window_end,
+  count() as events_in_session,
+  date_diff('second', window_start, window_end) as session_duration_sec
+FROM session(user_events, timestamp, 2s)
+PARTITION BY user_id
+GROUP BY user_id, window_start, window_end;
+```
+
+### Session with Activity Analysis
+
+```sql
+-- Analyze user sessions
+SELECT 
+  user_id,
+  window_start,
+  window_end,
+  count() as page_views,
+  count(DISTINCT page_url) as unique_pages,
+  sum(CASE WHEN action = 'purchase' THEN 1 ELSE 0 END) as purchases
+FROM session(user_activity, event_time, INTERVAL 5 MINUTE)
+PARTITION BY user_id
+GROUP BY user_id, window_start, window_end;
+```
+
+### Session Characteristics
+
+- Dynamic window size based on activity
+- Windows extend as long as events arrive within gap threshold
+- New window starts after inactivity gap
+- Must use PARTITION BY to define session scope
+
+```
+Gap: 5s
+
+Events:   A  B    C         D E F
+Time:     0s 2s   4s        12s 13s 15s
+Session1: [--------)                      (ends at 9s, 5s after event C)
+Session2:                   [----------)  (ends at 20s, 5s after event F)
+```
+
+## Window Columns
+
+All window functions provide:
+
+- `window_start`: Window start timestamp
+- `window_end`: Window end timestamp
+
+```sql
+SELECT 
+  window_start,
+  window_end,
+  date_diff('second', window_start, window_end) as window_size_sec,
+  count() as event_count
+FROM tumble(events, _tp_time, INTERVAL 1 MINUTE)
+GROUP BY window_start, window_end;
+```
+
+## Window Intervals
+
+### Supported Interval Types
+
+```sql
+-- Seconds
+tumble(events, _tp_time, INTERVAL 30 SECOND)
+
+-- Minutes  
+tumble(events, _tp_time, INTERVAL 5 MINUTE)
+
+-- Hours
+tumble(events, _tp_time, INTERVAL 1 HOUR)
+
+-- Days
+tumble(events, _tp_time, INTERVAL 1 DAY)
+
+-- Weeks
+tumble(events, _tp_time, INTERVAL 1 WEEK)
+```
+
+### Short Interval Syntax (Session only)
+
+```sql
+-- Session windows support short syntax
+session(events, timestamp, 5s)     -- 5 seconds
+session(events, timestamp, 2m)     -- 2 minutes
+session(events, timestamp, 1h)     -- 1 hour
+```
+
+## Timezone Support
+
+Specify timezone for window alignment:
+
+```sql
+-- Tumble with timezone
+SELECT 
+  window_start,
+  window_end,
+  count() as count
+FROM tumble(events, event_time, INTERVAL 1 HOUR, 'America/New_York')
+GROUP BY window_start, window_end;
+
+-- Hop with timezone
+SELECT 
+  window_start,
+  window_end,
+  count() as count
+FROM hop(events, event_time, INTERVAL 15 MINUTE, INTERVAL 1 HOUR, 'Asia/Shanghai')
+GROUP BY window_start, window_end;
+```
+
+## Complete Window Examples
+
+### Real-time Traffic Analysis
+
+```sql
+-- 1-minute traffic windows
+SELECT 
+  window_start,
+  window_end,
+  count() as request_count,
+  count(DISTINCT user_id) as unique_users,
+  avg(response_time_ms) as avg_response_ms,
+  quantile(0.95)(response_time_ms) as p95_response_ms
+FROM tumble(access_logs, request_time, INTERVAL 1 MINUTE)
+GROUP BY window_start, window_end
+EMIT STREAM;
+```
+
+### Sliding Average
+
+```sql
+-- 5-minute sliding average with 1-minute updates
+SELECT 
+  device_id,
+  window_start,
+  window_end,
+  avg(temperature) as avg_temp_5min,
+  count() as sample_count
+FROM hop(sensor_data, reading_time, INTERVAL 1 MINUTE, INTERVAL 5 MINUTE)
+GROUP BY device_id, window_start, window_end
+EMIT STREAM PERIODIC INTERVAL 1 MINUTE;
+```
+
+### User Session Analysis
+
+```sql
+-- Track user sessions with 5-minute timeout
+SELECT 
+  user_id,
+  window_start as session_start,
+  window_end as session_end,
+  count() as actions,
+  count(DISTINCT page_url) as pages_visited,
+  date_diff('minute', window_start, window_end) as session_minutes
+FROM session(page_views, view_time, INTERVAL 5 MINUTE)
+PARTITION BY user_id
+GROUP BY user_id, window_start, window_end
+HAVING count() > 5;  -- Filter short sessions
+```
+
+### Materialized View with Windows
+
+```sql
+-- Target stream
+CREATE STREAM hourly_metrics (
+  metric_hour datetime64(3),
+  device_id string,
+  avg_cpu float64,
+  max_cpu float64,
+  event_count int64
+);
+
+-- Materialized view with tumbling window
+CREATE MATERIALIZED VIEW hourly_metrics_mv INTO hourly_metrics AS
+SELECT 
+  window_start as metric_hour,
+  device_id,
+  avg(cpu_usage) as avg_cpu,
+  max(cpu_usage) as max_cpu,
+  count() as event_count
+FROM tumble(device_metrics, timestamp, INTERVAL 1 HOUR)
+GROUP BY device_id, window_start, window_end
+EMIT STREAM;
+```
+
+### Multi-Window Analysis
+
+```sql
+-- Compare 1-minute and 5-minute windows
+WITH 
+  one_min AS (
+    SELECT 
+      device_id,
+      window_start,
+      avg(value) as avg_1min
+    FROM tumble(metrics, timestamp, INTERVAL 1 MINUTE)
+    GROUP BY device_id, window_start, window_end
+  ),
+  five_min AS (
+    SELECT 
+      device_id,
+      window_start,
+      avg(value) as avg_5min
+    FROM tumble(metrics, timestamp, INTERVAL 5 MINUTE)
+    GROUP BY device_id, window_start, window_end
+  )
+SELECT 
+  one_min.device_id,
+  one_min.window_start,
+  one_min.avg_1min,
+  five_min.avg_5min,
+  abs(one_min.avg_1min - five_min.avg_5min) as variance
+FROM one_min
+LEFT JOIN five_min 
+  ON one_min.device_id = five_min.device_id
+  AND one_min.window_start >= five_min.window_start
+  AND one_min.window_start < five_min.window_end;
+```
+
+### Top-K in Windows
+
+```sql
+-- Find top auctions by bid count per window
+WITH auction_counts AS (
+  SELECT 
+    auction_id,
+    count(*) as bid_count,
+    window_start,
+    window_end
+  FROM hop(bids, bid_time, INTERVAL 2 SECOND, INTERVAL 10 SECOND)
+  GROUP BY auction_id, window_start, window_end
+),
+max_counts AS (
+  SELECT 
+    max(bid_count) as max_bids,
+    window_start,
+    window_end
+  FROM auction_counts
+  GROUP BY window_start, window_end
+)
+SELECT 
+  ac.auction_id,
+  ac.bid_count,
+  ac.window_start,
+  ac.window_end
+FROM auction_counts ac
+INNER JOIN max_counts mc
+  ON ac.window_start = mc.window_start
+  AND ac.window_end = mc.window_end
+WHERE ac.bid_count >= mc.max_bids;
+```
+
+## Choosing the Right Window Type
+
+<AccordionGroup>
+  <Accordion title="Use Tumbling Windows when...">
+    - You need non-overlapping time buckets
+    - Computing periodic metrics (hourly stats, daily summaries)
+    - Each event should be counted once
+    - Examples: hourly sales, daily active users, minute-by-minute traffic
+  </Accordion>
+  
+  <Accordion title="Use Hopping Windows when...">
+    - You need overlapping windows for smooth transitions
+    - Computing moving averages or trends
+    - Want to detect changes over sliding time periods
+    - Examples: 5-minute moving average, sliding percentiles
+  </Accordion>
+  
+  <Accordion title="Use Session Windows when...">
+    - Grouping events by activity sessions
+    - Activity is bursty with idle periods
+    - Window size depends on user/device behavior
+    - Examples: web sessions, IoT device activity, user journeys
+  </Accordion>
+</AccordionGroup>
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Choose appropriate window sizes">
+    Consider:
+    - Data arrival rate
+    - Required latency
+    - Memory constraints
+    - Business requirements
+    
+    ```sql
+    -- Too small: High overhead, many windows
+    tumble(events, _tp_time, INTERVAL 1 SECOND)
+    
+    -- Too large: High latency, delayed insights  
+    tumble(events, _tp_time, INTERVAL 1 DAY)
+    
+    -- Balanced for real-time monitoring
+    tumble(events, _tp_time, INTERVAL 1 MINUTE)
+    ```
+  </Accordion>
+  
+  <Accordion title="Always GROUP BY window columns">
+    Include window_start and window_end in GROUP BY:
+    ```sql
+    SELECT 
+      device_id,
+      window_start,
+      window_end,
+      count() as cnt
+    FROM tumble(metrics, timestamp, INTERVAL 5 MINUTE)
+    GROUP BY device_id, window_start, window_end;
+    ```
+  </Accordion>
+  
+  <Accordion title="Use event time, not ingestion time">
+    When available, use event timestamp for accurate windowing:
+    ```sql
+    -- Good: Use event timestamp
+    tumble(events, event_timestamp, INTERVAL 1 HOUR)
+    
+    -- May be inaccurate: Use ingestion time
+    tumble(events, _tp_time, INTERVAL 1 HOUR)
+    ```
+  </Accordion>
+  
+  <Accordion title="Consider timezone for daily/hourly windows">
+    Specify timezone for proper alignment:
+    ```sql
+    -- Aligns to UTC hours
+    tumble(events, timestamp, INTERVAL 1 HOUR)
+    
+    -- Aligns to New York hours
+    tumble(events, timestamp, INTERVAL 1 HOUR, 'America/New_York')
+    ```
+  </Accordion>
+  
+  <Accordion title="Use EMIT STREAM for controlled updates">
+    Control when window results are emitted:
+    ```sql
+    SELECT window_start, count() as cnt
+    FROM tumble(events, _tp_time, INTERVAL 5 MINUTE)
+    GROUP BY window_start, window_end
+    EMIT STREAM PERIODIC INTERVAL 5 SECOND;
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Aggregations" icon="chart-bar" href="/query/aggregations">
+    Learn more about aggregation functions
+  </Card>
+  <Card title="Joins" icon="link" href="/query/joins">
+    Combine windows with joins
+  </Card>
+  <Card title="Materialized Views" icon="eye" href="/concepts/materialized-views">
+    Materialize windowed aggregations
+  </Card>
+</CardGroup>

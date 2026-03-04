@@ -1,0 +1,402 @@
+---
+title: REST API
+description: Query Timeplus Proton via HTTP REST API
+---
+
+Timeplus Proton provides a REST API over HTTP for executing queries, streaming results, and ingesting data. This enables easy integration with any programming language or tool that supports HTTP.
+
+## API Endpoints
+
+### Default Ports
+
+- **Port 8123**: HTTP interface (batch mode by default)
+- **Port 3218**: Native protocol (streaming mode by default)
+
+The HTTP interface on port 8123 is the primary endpoint for REST API access.
+
+### Base URL
+
+```
+http://localhost:8123/
+```
+
+For secure deployments:
+
+```
+https://your-host:8443/
+```
+
+## Authentication
+
+### Basic Authentication
+
+Use HTTP Basic Authentication with username and password:
+
+```bash
+curl -u default: http://localhost:8123/
+```
+
+**Default credentials**:
+- Username: `default`
+- Password: (empty string)
+
+### Custom Credentials
+
+```bash
+curl -u myuser:mypassword http://localhost:8123/
+```
+
+## Query Execution
+
+### Simple Query (GET)
+
+```bash
+curl "http://localhost:8123/?query=SELECT%20version()"
+```
+
+### Query via POST
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM system.tables LIMIT 5"
+```
+
+### Query with Parameters
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM car_live_data LIMIT 10"
+```
+
+### Query with Settings
+
+Pass query settings as URL parameters:
+
+```bash
+curl "http://localhost:8123/?query=SELECT%20*%20FROM%20my_stream&max_rows_to_read=1000"
+```
+
+## Output Formats
+
+### JSON Format
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM table(car_live_data) LIMIT 5 FORMAT JSON"
+```
+
+Response:
+```json
+{
+  "meta": [
+    {"name": "column1", "type": "String"},
+    {"name": "column2", "type": "Int32"}
+  ],
+  "data": [
+    {"column1": "value1", "column2": 123},
+    {"column1": "value2", "column2": 456}
+  ],
+  "rows": 2
+}
+```
+
+### JSONEachRow Format
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM table(events) LIMIT 3 FORMAT JSONEachRow"
+```
+
+Response:
+```json
+{"column1":"value1","column2":123}
+{"column1":"value2","column2":456}
+{"column1":"value3","column2":789}
+```
+
+### CSV Format
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM table(events) LIMIT 5 FORMAT CSV"
+```
+
+### TSV Format
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM events FORMAT TSV"
+```
+
+### Available Formats
+
+- `JSON` - JSON with metadata
+- `JSONEachRow` - One JSON object per line
+- `JSONCompact` - Compact JSON format
+- `CSV` - Comma-separated values
+- `TSV` - Tab-separated values
+- `TabSeparated` - Same as TSV
+- `Pretty` - Human-readable table format
+- `PrettyCompact` - Compact table format
+- `Values` - VALUES format for INSERT
+- `Null` - No output (for performance testing)
+
+## Streaming Results
+
+By default on port 8123, queries run in batch mode. For streaming queries, use the `table()` function or query streaming mode endpoints.
+
+### Batch Query (Default on Port 8123)
+
+```bash
+# Returns all existing data
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM table(my_stream) FORMAT JSONEachRow"
+```
+
+### Streaming Query with LIMIT
+
+```bash
+# Stream until 100 events are received
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM my_stream LIMIT 100 FORMAT JSONEachRow"
+```
+
+### Long-Running Queries
+
+For long-running streaming queries, ensure proper timeout settings:
+
+```bash
+curl -X POST http://localhost:8123/ \
+  --no-buffer \
+  -d "SELECT * FROM my_stream FORMAT JSONEachRow"
+```
+
+## Data Ingestion
+
+### INSERT Query
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "INSERT INTO my_stream (device, temperature) VALUES ('sensor1', 25.5)"
+```
+
+### Bulk INSERT with JSONEachRow
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -H "Content-Type: application/json" \
+  -d '{"device":"sensor1","temperature":25.5}
+{"device":"sensor2","temperature":26.3}
+{"device":"sensor3","temperature":24.8}' \
+  "INSERT INTO my_stream FORMAT JSONEachRow"
+```
+
+### Bulk INSERT with CSV
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d 'sensor1,25.5
+sensor2,26.3
+sensor3,24.8' \
+  "INSERT INTO my_stream FORMAT CSV"
+```
+
+### INSERT from File
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -F "query=INSERT INTO my_stream FORMAT JSONEachRow" \
+  -F "data=@data.json"
+```
+
+## Database Operations
+
+### Create Stream
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "CREATE STREAM events (timestamp datetime64(3), event_type string, user_id int32)"
+```
+
+### Create External Stream
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -d "CREATE EXTERNAL STREAM kafka_stream (data string) \
+  SETTINGS type='kafka', brokers='localhost:9092', topic='events'"
+```
+
+### Show Tables
+
+```bash
+curl "http://localhost:8123/?query=SHOW%20STREAMS"
+```
+
+### Describe Table
+
+```bash
+curl "http://localhost:8123/?query=DESCRIBE%20my_stream"
+```
+
+## Error Handling
+
+### HTTP Status Codes
+
+- `200 OK` - Query executed successfully
+- `400 Bad Request` - Syntax error or invalid query
+- `401 Unauthorized` - Authentication failed
+- `403 Forbidden` - Permission denied
+- `404 Not Found` - Database or table not found
+- `500 Internal Server Error` - Server error
+
+### Error Response Format
+
+```json
+{
+  "exception": "Code: 60. DB::Exception: Table default.nonexistent doesn't exist"
+}
+```
+
+### Handle Errors in Curl
+
+```bash
+response=$(curl -s -w "\n%{http_code}" -X POST http://localhost:8123/ \
+  -d "SELECT * FROM nonexistent")
+
+http_code=$(echo "$response" | tail -n1)
+if [ "$http_code" != "200" ]; then
+  echo "Error: HTTP $http_code"
+  echo "$response" | head -n-1
+fi
+```
+
+## Advanced Usage
+
+### Query Parameters
+
+Common URL parameters:
+
+| Parameter | Description | Example |
+|-----------|-------------|----------|
+| `query` | SQL query to execute | `query=SELECT 1` |
+| `database` | Default database | `database=mydb` |
+| `default_format` | Default output format | `default_format=JSON` |
+| `max_execution_time` | Query timeout (seconds) | `max_execution_time=60` |
+| `max_rows_to_read` | Max rows to read | `max_rows_to_read=10000` |
+
+### Custom Headers
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -H "X-Proton-Database: mydb" \
+  -H "X-Proton-Format: JSONEachRow" \
+  -d "SELECT * FROM events"
+```
+
+### Compression
+
+Enable gzip compression:
+
+```bash
+curl -X POST http://localhost:8123/ \
+  -H "Accept-Encoding: gzip" \
+  --compressed \
+  -d "SELECT * FROM large_table FORMAT JSONEachRow"
+```
+
+## Example: Python Client
+
+```python
+import requests
+
+# Simple query
+response = requests.post(
+    'http://localhost:8123/',
+    data='SELECT version()'
+)
+print(response.text)
+
+# Query with JSON format
+response = requests.post(
+    'http://localhost:8123/',
+    data='SELECT * FROM table(my_stream) LIMIT 5 FORMAT JSON'
+)
+data = response.json()
+print(data)
+
+# Insert data
+payload = '{"device":"sensor1","temp":25.5}\n{"device":"sensor2","temp":26.3}'
+response = requests.post(
+    'http://localhost:8123/?query=INSERT INTO my_stream FORMAT JSONEachRow',
+    data=payload
+)
+print(response.status_code)
+```
+
+## Example: JavaScript/Node.js Client
+
+```javascript
+const axios = require('axios');
+
+// Execute query
+axios.post('http://localhost:8123/', 'SELECT version()')
+  .then(response => {
+    console.log(response.data);
+  })
+  .catch(error => {
+    console.error('Error:', error.response.data);
+  });
+
+// Insert data
+const data = '{"device":"sensor1","temp":25.5}\n';
+axios.post(
+  'http://localhost:8123/?query=INSERT INTO my_stream FORMAT JSONEachRow',
+  data,
+  { headers: { 'Content-Type': 'application/json' } }
+).then(() => console.log('Inserted'));
+```
+
+## Example: Streaming Query with curl
+
+```bash
+#!/bin/bash
+
+# Stream data and process line by line
+curl -N -X POST http://localhost:8123/ \
+  -d "SELECT * FROM my_stream FORMAT JSONEachRow" | \
+while IFS= read -r line; do
+  echo "Received: $line"
+  # Process each line
+done
+```
+
+## Health Check Endpoint
+
+```bash
+curl http://localhost:8123/ping
+```
+
+Response: `Ok.`
+
+## Performance Tips
+
+1. **Use JSONEachRow for large results**: More efficient than JSON format
+2. **Enable compression**: Add `--compressed` to curl for large responses
+3. **Batch inserts**: Insert multiple rows in one request
+4. **Reuse connections**: Use HTTP keep-alive for multiple requests
+5. **Use LIMIT**: Prevent unbounded streaming queries
+
+## Security Considerations
+
+1. **Use HTTPS in production**: Encrypt data in transit
+2. **Enable authentication**: Don't expose unauthenticated endpoints
+3. **Firewall rules**: Restrict access to trusted IPs
+4. **Rate limiting**: Implement at reverse proxy level
+5. **Query timeouts**: Set `max_execution_time` to prevent runaway queries
+
+## Related Resources
+
+- [Kafka Integration](/integration/kafka)
+- [ClickHouse Integration](/integration/clickhouse)
+- [Client Libraries](/integration/client-libraries)
+- [JDBC Driver](https://github.com/timeplus-io/proton-java-driver) (external)

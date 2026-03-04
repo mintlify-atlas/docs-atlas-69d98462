@@ -1,0 +1,367 @@
+---
+title: Telemetry Data Pipeline
+description: Process logs, metrics, and traces in real-time with Timeplus Proton for observability and monitoring
+---
+
+Telemetry pipelines are critical for modern observability. Timeplus Proton provides a powerful SQL-based approach to process logs, metrics, and traces in real-time, offering an alternative to traditional ELK stacks with superior performance.
+
+## Use Case Overview
+
+Telemetry pipelines powered by Proton enable:
+- **Real-time Log Analysis**: Process application and system logs as they arrive
+- **Metrics Aggregation**: Compute statistics and rollups for time-series data
+- **Distributed Tracing**: Analyze request flows across microservices
+- **Alerting**: Detect anomalies and trigger notifications
+- **SQL-based Observability**: Query telemetry data using standard SQL
+
+## Why SQL-based Observability?
+
+[SQL-based Observability](https://clickhouse.com/blog/the-state-of-sql-based-observability) is growing in popularity due to:
+
+- **Performance**: ClickHouse-based solutions handle 300K+ logs/second vs 25K for ELK (Uber case study)
+- **Fast Aggregations**: Columnar storage enables sub-second queries over billions of rows
+- **Familiar Interface**: Use SQL instead of domain-specific query languages
+- **Real-time + Historical**: Single system for both streaming and batch analytics
+
+## Architecture: Nginx Access Log Streaming
+
+This tutorial demonstrates real-time analysis of Nginx access logs using Timeplus Proton.
+
+### Deployment Options
+
+**Option 1: Simple (Development)**
+```
+Nginx → Proton (via external stream on log files)
+```
+
+**Option 2: Production (Scalable)**
+```
+Nginx → Filebeat → Kafka → Proton → ClickHouse/Visualization
+```
+
+**Option 3: Hybrid**
+```
+Nginx → Vector → Proton → Output Destinations
+```
+
+## Tutorial: Real-time Nginx Log Analysis
+
+### Setup: NFS-based Log Sharing
+
+For production environments, share logs securely over NFS:
+
+**On Nginx Server:**
+```bash
+# Install NFS server
+sudo apt-get install nfs-kernel-server -y
+
+# Configure export (whitelist Proton server IP)
+echo "/var/log/nginx 172.31.24.29(ro,sync,no_subtree_check)" | sudo tee -a /etc/exports
+
+# Export and start
+sudo exportfs -ra
+sudo systemctl restart nfs-kernel-server
+```
+
+**On Proton Server:**
+```bash
+# Install NFS client
+sudo apt install nfs-common -y
+
+# Mount logs
+sudo mkdir -p /mnt/nginx
+sudo mount 172.31.17.58:/var/log/nginx /mnt/nginx
+```
+
+### Step 1: Create External Stream for Log Files
+
+Proton can directly tail log files and parse timestamps:
+
+```sql
+CREATE EXTERNAL STREAM nginx_access_log (
+    raw string
+)
+SETTINGS
+    type='log',
+    log_files='access.log',
+    log_dir='/mnt/nginx',
+    timestamp_regex='(\[\d{2}\/\w+\/\d{4}:\d{2}:\d{2}:\d{2} \+\d{4}\])',
+    row_delimiter='(\n)';
+```
+
+### Step 2: Query Live Traffic
+
+View logs in real-time:
+
+```sql
+SELECT * FROM nginx_access_log;
+```
+
+This query continuously returns new log lines as requests hit your server.
+
+### Step 3: Parse and Analyze Logs
+
+Create a parsed view with structured fields:
+
+```sql
+CREATE MATERIALIZED VIEW nginx_parsed AS
+SELECT
+    extract(raw, '(\d+\.\d+\.\d+\.\d+)') AS ip,
+    parse_datetime64_best_effort(extract(raw, '\[(.*?)\]')) AS timestamp,
+    extract(raw, '"(\w+) (.*?) HTTP/.*?"') AS method,
+    extract(raw, '"\w+ (.*?) HTTP/.*?"') AS path,
+    extract(raw, '" (\d{3}) ') AS status,
+    extract(raw, '" \d{3} (\d+)') AS bytes
+FROM nginx_access_log;
+```
+
+### Step 4: Real-time Analytics
+
+**Request Rate by Method:**
+```sql
+SELECT
+    method,
+    count() AS requests,
+    bar(requests, 0, 100, 50) AS bar
+FROM nginx_parsed
+GROUP BY method
+LIMIT 10 BY emit_version();
+```
+
+**Error Rate Monitoring:**
+```sql
+SELECT
+    if(status >= 400, '40x+', 'ok') AS status_category,
+    count() AS count,
+    count() * 100.0 / sum(count()) OVER () AS percentage
+FROM nginx_parsed
+GROUP BY status_category;
+```
+
+**Top Requested Pages (excluding static assets):**
+```sql
+SELECT
+    path,
+    count() AS requests
+FROM nginx_parsed
+WHERE path NOT LIKE '%.js%'
+  AND path NOT LIKE '%.css%'
+  AND path NOT LIKE '%.png%'
+  AND path NOT LIKE '%.jpg%'
+GROUP BY path
+ORDER BY requests DESC
+LIMIT 10;
+```
+
+### Step 5: Windowed Aggregations
+
+Compute metrics per time window:
+
+```sql
+SELECT
+    window_start,
+    count() AS requests,
+    count_if(status >= 400) AS errors,
+    errors * 100.0 / requests AS error_rate,
+    avg(bytes) AS avg_bytes
+FROM tumble(nginx_parsed, 1m)
+GROUP BY window_start;
+```
+
+## Alerting Patterns
+
+### High Error Rate Alert
+
+```sql
+CREATE MATERIALIZED VIEW alert_high_error_rate AS
+SELECT
+    window_start,
+    count_if(status >= 500) AS server_errors,
+    count() AS total_requests,
+    server_errors * 100.0 / total_requests AS error_rate
+FROM tumble(nginx_parsed, 1m)
+GROUP BY window_start
+HAVING error_rate > 5.0;  -- Alert when >5% error rate
+```
+
+### Traffic Spike Detection
+
+```sql
+CREATE MATERIALIZED VIEW alert_traffic_spike AS
+SELECT
+    window_start,
+    count() AS current_requests,
+    lag(count(), 1) OVER (ORDER BY window_start) AS previous_requests,
+    current_requests * 100.0 / previous_requests AS growth_rate
+FROM tumble(nginx_parsed, 1m)
+GROUP BY window_start
+HAVING growth_rate > 200;  -- Alert when traffic doubles
+```
+
+### Slow Response Detection
+
+```sql
+CREATE MATERIALIZED VIEW alert_slow_requests AS
+SELECT
+    _tp_time,
+    path,
+    extract(raw, 'request_time=(\d+\.\d+)') AS response_time
+FROM nginx_access_log
+WHERE response_time::float64 > 2.0;  -- Alert when >2 seconds
+```
+
+## Historical Analysis with CSV Import
+
+For analyzing historical logs, convert and import them:
+
+### Step 1: Convert Logs to CSV
+
+Use a parser script to convert Nginx logs:
+
+```python
+import re
+import csv
+
+def parse_nginx_log(line):
+    pattern = r'(\S+) - (\S+) \[([^\]]+)\] "(\S+) (\S+) (\S+)" (\d+) (\d+)'
+    match = re.match(pattern, line)
+    if match:
+        return match.groups()
+    return None
+
+with open('access.log') as f_in, open('access.csv', 'w') as f_out:
+    writer = csv.writer(f_out)
+    writer.writerow(['ip', 'user', 'timestamp', 'method', 'path', 'protocol', 'status', 'bytes'])
+    for line in f_in:
+        parsed = parse_nginx_log(line)
+        if parsed:
+            writer.writerow(parsed)
+```
+
+### Step 2: Create Historical Table
+
+```sql
+CREATE TABLE nginx_historical (
+    remote_ip ipv4,
+    remote_user string,
+    date_time datetime64(3),
+    http_verb string,
+    path string,
+    http_version string,
+    status uint32,
+    bytes uint32
+)
+PRIMARY KEY (date_time, remote_ip);
+```
+
+### Step 3: Import CSV
+
+```sql
+INSERT INTO nginx_historical
+SELECT *
+FROM file('access.csv', 'CSVWithNames')
+SETTINGS max_insert_threads = 8;
+```
+
+### Step 4: Historical Analytics
+
+**Error analysis:**
+```sql
+SELECT
+    if(status >= 400, '40x+', 'ok') AS status_category,
+    count() AS count
+FROM nginx_historical
+GROUP BY status_category;
+```
+
+**Traffic patterns by hour:**
+```sql
+SELECT
+    to_hour(date_time) AS hour,
+    count() AS requests
+FROM nginx_historical
+GROUP BY hour
+ORDER BY hour;
+```
+
+## Geographic Analysis with IP Enrichment
+
+Enrich logs with geographic data:
+
+```sql
+-- Create IP info table
+CREATE TABLE ip_geolocation (
+    ip ipv4,
+    city string,
+    country string,
+    country_name string,
+    country_flag_emoji string,
+    continent string
+);
+
+-- Query with geolocation
+SELECT
+    ipv4_num_to_string_class_c(n.remote_ip) AS ip,
+    count(*) AS requests,
+    g.country_name,
+    g.country_flag_emoji
+FROM nginx_historical AS n
+JOIN ip_geolocation AS g ON n.remote_ip = g.ip
+GROUP BY ip, country_name, country_flag_emoji
+HAVING requests > 100
+ORDER BY requests DESC
+LIMIT 50;
+```
+
+## Visualization with Grafana
+
+Connect Proton to Grafana using the [Timeplus Proton plugin](https://grafana.com/grafana/plugins/timeplus-proton-datasource/):
+
+1. Install the plugin in Grafana
+2. Configure data source pointing to Proton
+3. Create dashboards with real-time queries
+
+**Example Dashboard Queries:**
+
+- **Requests per second**: `SELECT count() FROM nginx_parsed`
+- **P95 Response Time**: `SELECT quantile(0.95)(response_time) FROM nginx_parsed`
+- **Geographic Distribution**: Join with IP geolocation table
+
+## Performance Tips
+
+### Materialize Frequently Queried Fields
+
+Instead of parsing JSON in every query, create a materialized view:
+
+```sql
+CREATE MATERIALIZED VIEW nginx_structured AS
+SELECT
+    parse_datetime64_best_effort(extract(raw, '\[(.*?)\]')) AS timestamp,
+    extract(raw, '(\d+\.\d+\.\d+\.\d+)') AS ip,
+    extract(raw, '"(\w+)') AS method,
+    extract(raw, '" (\d{3})') AS status
+FROM nginx_access_log;
+```
+
+### Use Appropriate Data Types
+
+```sql
+-- Use ipv4 instead of string for IP addresses
+CREATE TABLE logs (
+    ip ipv4,  -- More efficient than string
+    timestamp datetime64(3),
+    status uint16  -- Use smallest type that fits
+);
+```
+
+## Next Steps
+
+- Explore [Feature Pipeline](/examples/feature-pipeline) for ML feature computation
+- Learn about [Real-time ETL](/examples/real-time-etl) patterns
+- Set up [Change Data Capture](/examples/change-data-capture) for databases
+
+## Related Resources
+
+- [External Stream Documentation](/concepts/external-streams)
+- [Grafana Integration](/operations/monitoring)
+- [Timeplus Blog: Log Stream Analysis](https://www.timeplus.com/post/log-stream-analysis)

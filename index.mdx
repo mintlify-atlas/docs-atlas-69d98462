@@ -1,97 +1,219 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Timeplus Proton Documentation"
+description: "The fastest SQL pipeline engine in a single C++ binary for stream processing, analytics, observability and AI"
+mode: "custom"
 ---
 
-## Setting up
+<div className="bg-[#fff0f7] dark:bg-[#0f1117] py-20">
+  <div className="max-w-7xl mx-auto px-6 lg:px-8">
+    <div className="grid lg:grid-cols-2 gap-12 items-center">
+      <div>
+        <h1 className="text-5xl lg:text-6xl font-bold text-gray-900 dark:text-gray-100 mb-6">
+          Timeplus Proton Documentation
+        </h1>
+        <p className="text-xl text-gray-600 dark:text-gray-400 mb-8 max-w-2xl">
+          Learn how to build blazing-fast stream processing pipelines with the fastest SQL engine in a single binary. No JVM. No Zookeeper. Just speed, control, and scale.
+        </p>
+        <div className="flex flex-col sm:flex-row gap-4 flex-wrap">
+          <a 
+            href="/quickstart" 
+            className="inline-flex items-center justify-center px-6 py-3 bg-[#d93f87] hover:bg-[#c02d72] text-white font-semibold rounded-lg transition-colors no-underline"
+          >
+            Get Started
+          </a>
+          <a 
+            href="/concepts/architecture" 
+            className="inline-flex items-center justify-center px-6 py-3 bg-white dark:bg-[#1a1d27] border border-gray-300 dark:border-[#27272a] text-gray-900 dark:text-gray-100 font-semibold rounded-lg hover:bg-gray-50 dark:hover:bg-[#242838] transition-colors no-underline"
+          >
+            Learn the Concepts
+          </a>
+        </div>
+      </div>
+      <div className="hidden lg:block">
+        <div className="bg-white dark:bg-[#1a1d27] rounded-2xl border border-gray-200 dark:border-[#27272a] p-6 shadow-lg">
+          <div className="text-sm text-gray-500 dark:text-gray-400 mb-3">Quick Example</div>
+          <pre className="text-sm bg-gray-50 dark:bg-[#0f1117] p-4 rounded-lg overflow-x-auto"><code className="text-gray-800 dark:text-gray-200">{`-- Create a stream
+CREATE STREAM devices(
+  device string,
+  temperature float);
 
-Get your documentation site up and running in minutes.
+-- Real-time aggregation
+SELECT device, 
+       count(*), 
+       avg(temperature)
+FROM devices 
+GROUP BY device;`}</code></pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-4">Quick Start</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Get Proton running in seconds</p>
+  
+  <Steps>
+    <Step title="Install Proton">
+      Install Proton with a single command:
+      
+      ```bash
+      curl https://install.timeplus.com/oss | sh
+      ```
+      
+      Or use Docker:
+      
+      ```bash
+      docker run -d -p 8123:8123 -p 8463:8463 --name proton \
+        d.timeplus.com/timeplus-io/proton:latest
+      ```
+    </Step>
+    
+    <Step title="Start the Server">
+      Launch Proton server and client:
+      
+      ```bash
+      proton server  # In one terminal
+      proton client  # In another terminal
+      ```
+      
+      <Info>On Mac, you can also use Homebrew: `brew install timeplus-io/timeplus/proton`</Info>
+    </Step>
+    
+    <Step title="Run Your First Query">
+      Create a stream and query real-time data:
+      
+      ```sql
+      -- Create a stream with random data
+      CREATE RANDOM STREAM devices(
+        device string default 'device'||to_string(rand()%4),
+        temperature float default rand()%1000/10);
+      
+      -- Query streaming data
+      SELECT device, count(*), avg(temperature)
+      FROM devices 
+      GROUP BY device;
+      ```
+      
+      <Accordion title="See example output">
+      ```
+      ┌─device──┬─count()─┬─avg(temperature)─┐
+      │ device0 │    2256 │             49.8 │
+      │ device1 │    2260 │             50.2 │
+      │ device3 │    2259 │             49.5 │
+      │ device2 │    2225 │             50.1 │
+      └─────────┴─────────┴──────────────────┘
+      ```
+      </Accordion>
+    </Step>
+  </Steps>
+</div>
 
-## Make it yours
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-4">Explore by Topic</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Deep dive into Proton's capabilities</p>
+  
+  <CardGroup cols={3}>
+    <Card title="Architecture" icon="sitemap" href="/concepts/architecture">
+      Understand how Proton processes streams with ClickHouse-powered performance
+    </Card>
+    <Card title="Streams" icon="water" href="/concepts/streams">
+      Learn about streams, the core abstraction for real-time data processing
+    </Card>
+    <Card title="Windows" icon="window" href="/concepts/windows">
+      Master tumbling, hopping, and session windows for time-based aggregations
+    </Card>
+    <Card title="Kafka Integration" icon="layer-group" href="/integration/kafka">
+      Connect to Kafka, Redpanda, and other streaming platforms with external streams
+    </Card>
+    <Card title="Materialized Views" icon="eye" href="/concepts/materialized-views">
+      Build real-time dashboards with incrementally maintained aggregations
+    </Card>
+    <Card title="SQL Reference" icon="code" href="/sql/create-stream">
+      Complete SQL syntax reference for stream processing commands
+    </Card>
+  </CardGroup>
+</div>
 
-Design a docs site that looks great and empowers your users.
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-4">Use Cases</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">See what you can build with Proton</p>
+  
+  <CardGroup cols={2}>
+    <Card title="Real-Time ETL" icon="arrow-right-arrow-left" href="/examples/real-time-etl">
+      Build streaming data pipelines that transform and route data in real-time
+    </Card>
+    <Card title="Telemetry Pipeline" icon="chart-line" href="/examples/telemetry-pipeline">
+      Process logs, metrics, and traces with in-pipeline aggregation and alerting
+    </Card>
+    <Card title="AI Feature Pipeline" icon="brain" href="/examples/feature-pipeline">
+      Compute real-time features for machine learning models with low latency
+    </Card>
+    <Card title="Change Data Capture" icon="database" href="/examples/change-data-capture">
+      Stream database changes and maintain real-time replicas
+    </Card>
+  </CardGroup>
+</div>
 
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
-  </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
-  </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
-  </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
-  </Card>
-</Columns>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-4">Why Proton?</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">The fastest, simplest stream processing engine</p>
+  
+  <div className="grid md:grid-cols-2 gap-6">
+    <div className="bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <div className="text-2xl mb-3">⚡</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Blazing Fast</h3>
+      <p className="text-gray-600 dark:text-gray-400">90M events/sec with 4ms latency on commodity hardware. Written in C++ with SIMD optimizations.</p>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <div className="text-2xl mb-3">🪶</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Lightweight</h3>
+      <p className="text-gray-600 dark:text-gray-400">Single binary under 500MB. No JVM, no Zookeeper. Runs on t2.nano with 0.5GB RAM.</p>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <div className="text-2xl mb-3">🔗</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Native Kafka Support</h3>
+      <p className="text-gray-600 dark:text-gray-400">Query Kafka topics directly with external streams. No data copying required.</p>
+    </div>
+    
+    <div className="bg-white dark:bg-[#1a1d27] border border-gray-200 dark:border-[#27272a] rounded-xl p-6">
+      <div className="text-2xl mb-3">💎</div>
+      <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">SQL for Everything</h3>
+      <p className="text-gray-600 dark:text-gray-400">Streaming ingestion, JOINs, windows, materialized views, UDFs—all with standard SQL.</p>
+    </div>
+  </div>
+</div>
 
-## Create beautiful pages
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <div className="bg-gradient-to-r from-[#d93ca6] to-[#d93f87] rounded-2xl p-8 text-center">
+    <h2 className="text-3xl font-bold text-white mb-4">Ready to Get Started?</h2>
+    <p className="text-white/90 mb-6 max-w-2xl mx-auto">
+      Install Proton in seconds and start building real-time data pipelines with SQL
+    </p>
+    <a 
+      href="/quickstart" 
+      className="inline-flex items-center justify-center px-8 py-4 bg-white text-[#d93f87] font-bold rounded-lg hover:bg-gray-100 transition-colors no-underline"
+    >
+      Start Building →
+    </a>
+  </div>
+</div>
 
-Everything you need to create world-class documentation.
-
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
-
-## Need inspiration?
-
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+<div className="mt-16 mb-16 max-w-5xl mx-auto px-6">
+  <h2 className="text-3xl font-bold text-gray-900 dark:text-gray-100 mb-4">Community & Support</h2>
+  <p className="text-base text-gray-600 dark:text-gray-400 mb-8">Get help and connect with other Proton users</p>
+  
+  <CardGroup cols={3}>
+    <Card title="GitHub" icon="github" href="https://github.com/timeplus-io/proton">
+      Star the repo, report issues, and contribute to development
+    </Card>
+    <Card title="Slack Community" icon="slack" href="https://timeplus.com/slack">
+      Join our community Slack to ask questions and share your projects
+    </Card>
+    <Card title="Examples" icon="code" href="https://github.com/timeplus-io/proton/tree/develop/examples">
+      Browse real-world examples and templates to get started faster
+    </Card>
+  </CardGroup>
+</div>

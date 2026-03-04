@@ -1,0 +1,334 @@
+---
+title: Deployment
+description: Deploy Timeplus Proton in various environments
+---
+
+Timeplus Proton is a lightweight, single-binary stream processing engine that can be deployed in multiple ways. This guide covers different deployment options and configurations.
+
+## Docker Deployment
+
+### Quick Start with Docker
+
+The fastest way to get started with Proton is using Docker:
+
+```bash
+docker run -d --pull always -p 8123:8123 -p 8463:8463 --name proton d.timeplus.com/timeplus-io/proton:latest
+```
+
+### Port Mappings
+
+Proton exposes multiple ports for different protocols:
+
+| Port | Protocol | Description |
+|------|----------|-------------|
+| 8123 | HTTP | REST API, JDBC driver (batch mode), web interfaces |
+| 8463 | TCP | Native protocol for proton-client |
+| 3218 | HTTP | HTTP API (streaming mode) |
+| 9000 | TCP | ClickHouse-compatible native protocol |
+| 5432 | PostgreSQL | PostgreSQL protocol compatibility |
+| 9004 | MySQL | MySQL protocol compatibility |
+
+### Docker Compose Example
+
+For production deployments or integration with Kafka/Redpanda, use Docker Compose:
+
+```yaml
+version: "3"
+
+services:
+  proton:
+    image: d.timeplus.com/timeplus-io/proton:latest
+    pull_policy: always
+    ports:
+      - "8123:8123" # HTTP
+      - "8463:8463" # Native TCP
+    volumes:
+      - proton-data:/var/lib/proton
+    environment:
+      # Optional: Configure Kafka/Redpanda integration
+      - STREAM_STORAGE_BROKERS=redpanda:9092
+      - STREAM_STORAGE_TYPE=kafka
+      - STREAM_STORAGE_CLUSTER_ID=proton-cluster
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:latest
+    command:
+      - redpanda start
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --smp 1
+      - --memory 1G
+      - --mode dev-container
+    ports:
+      - "19092:19092"
+
+volumes:
+  proton-data:
+```
+
+### Docker Environment Variables
+
+Configure Proton behavior using environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `PROTON_CONFIG` | `/etc/proton-server/config.yaml` | Path to configuration file |
+| `STREAM_STORAGE_BROKERS` | - | Kafka broker addresses (e.g., `kafka:9092`) |
+| `STREAM_STORAGE_TYPE` | `nativelog` | Storage type: `kafka` or `nativelog` |
+| `STREAM_STORAGE_CLUSTER_ID` | - | Kafka cluster ID |
+| `MAX_CONCURRENT_QUERIES` | 100 | Maximum concurrent queries |
+| `MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO` | 0.9 | Memory usage ratio (0-1) |
+| `MAX_SERVER_MEMORY_CACHE_TO_RAM_RATIO` | 0.5 | Cache size ratio (0-1) |
+
+### Volume Mounts
+
+For persistent data, mount these directories:
+
+```bash
+docker run -d \
+  -v /path/to/data:/var/lib/proton \
+  -v /path/to/logs:/var/log/proton-server \
+  -v /path/to/config:/etc/proton-server \
+  -p 8123:8123 -p 8463:8463 \
+  d.timeplus.com/timeplus-io/proton:latest
+```
+
+## Binary Deployment
+
+### One-Line Installation
+
+Install Proton binary on Linux or macOS:
+
+```bash
+curl https://install.timeplus.com/oss | sh
+```
+
+This downloads the latest `proton` binary and makes it available in your PATH.
+
+### Homebrew (macOS)
+
+For macOS users, install via Homebrew:
+
+```bash
+brew install timeplus-io/timeplus/proton
+
+# Start the server
+proton server start
+
+# Connect with client
+proton client
+```
+
+### Manual Binary Deployment
+
+1. **Download the binary** from the [releases page](https://github.com/timeplus-io/proton/releases)
+
+2. **Extract and install**:
+   ```bash
+   tar -xzf proton-linux-x86_64.tar.gz
+   cd proton
+   ./proton install --user proton --group proton
+   ```
+
+3. **Start the server**:
+   ```bash
+   # With config file
+   proton server --config-file /path/to/config.yaml
+   
+   # Without config (uses current directory)
+   proton server start
+   ```
+
+4. **Connect with client**:
+   ```bash
+   proton client
+   ```
+
+### Building from Source
+
+For custom builds, compile from source:
+
+#### Ubuntu/Debian
+
+```bash
+# Install dependencies
+apt install git cmake ccache python3 ninja-build wget \
+  apt-transport-https ca-certificates
+
+# Install LLVM 19
+wget https://apt.llvm.org/llvm.sh
+chmod +x llvm.sh
+sudo ./llvm.sh 19
+
+# Clone and build
+git clone --recurse-submodules git@github.com:timeplus-io/proton.git
+cd proton
+mkdir -p build && cd build
+cmake ..
+ninja
+```
+
+#### macOS (Apple Silicon)
+
+```bash
+# Install dependencies
+brew install llvm@19 cmake ninja ccache
+
+# Set environment
+export PATH=$(brew --prefix llvm@19)/bin:$PATH
+export CC=$(brew --prefix llvm@19)/bin/clang
+export CXX=$(brew --prefix llvm@19)/bin/clang++
+
+# Clone and build
+git clone --recurse-submodules git@github.com:timeplus-io/proton.git
+cd proton
+mkdir -p build && cd build
+cmake ..
+ninja
+```
+
+#### Optional Build Flags
+
+- **Disable JavaScript/V8** (smaller binaries):
+  ```bash
+  cmake -DENABLE_V8=OFF ..
+  ```
+
+## Resource Requirements
+
+### Minimum Requirements
+
+- **CPU**: 1 vCPU
+- **Memory**: 512 MB (can run on AWS t2.nano)
+- **Disk**: 500 MB for binary, plus data storage
+- **OS**: Linux (Ubuntu 20.04+, RHEL 8+), macOS 11+
+
+### Recommended for Production
+
+- **CPU**: 4+ vCPUs
+- **Memory**: 8+ GB RAM
+- **Disk**: SSD with sufficient space for data and checkpoints
+- **Network**: Low-latency connection to Kafka/data sources
+
+### High-Performance Configuration
+
+For maximum throughput (targeting 90M EPS):
+
+- **CPU**: 8+ vCPUs with AVX2/AVX-512 support
+- **Memory**: 32+ GB RAM
+- **Disk**: NVMe SSD for data and checkpoint storage
+- **Network**: 10+ Gbps network interface
+
+## Deployment Architectures
+
+### Single Node
+
+Simplest deployment for development and small workloads:
+
+```
+┌─────────────────┐
+│  Proton Server  │
+│  (All Roles)    │
+└─────────────────┘
+```
+
+### With External Kafka
+
+Production deployment with Kafka for streaming storage:
+
+```
+┌─────────────────┐      ┌─────────────────┐
+│  Proton Server  │◄────►│  Kafka/Redpanda │
+│  (Compute +     │      │  (Stream Store) │
+│   Metadata)     │      └─────────────────┘
+└─────────────────┘
+```
+
+### Multi-Container Setup
+
+Example Docker Compose with monitoring:
+
+```yaml
+services:
+  proton:
+    image: d.timeplus.com/timeplus-io/proton:latest
+    ports:
+      - "8123:8123"
+      - "8463:8463"
+    environment:
+      - STREAM_STORAGE_BROKERS=kafka:9092
+      - MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO=0.8
+
+  kafka:
+    image: bitnami/kafka:latest
+    ports:
+      - "9092:9092"
+
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+```
+
+## Security Considerations
+
+### User and Permissions
+
+Proton runs as user `timeplus` (UID 101) in Docker:
+
+```bash
+# If running with custom UID
+docker run --user 101:101 \
+  -v /data/proton:/var/lib/proton \
+  d.timeplus.com/timeplus-io/proton:latest
+```
+
+### Network Security
+
+- Bind to specific interfaces instead of `0.0.0.0`
+- Use TLS for HTTP and TCP connections
+- Implement firewall rules to restrict access
+- Use authentication (configure in `users.yaml`)
+
+### TLS Configuration
+
+Enable HTTPS and secure TCP:
+
+```yaml
+https_port: 8443
+tcp_port_secure: 9440
+
+openSSL:
+  server:
+    certificateFile: /etc/proton-server/server.crt
+    privateKeyFile: /etc/proton-server/server.key
+    caConfig: /etc/proton-server/ca.crt
+```
+
+## Health Checks
+
+### Docker Health Check
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=3s \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+```
+
+### HTTP Endpoint
+
+```bash
+curl http://localhost:8123/ping
+# Returns: Ok.
+```
+
+### TCP Connection Test
+
+```bash
+echo "SELECT 1" | proton client --host localhost --port 8463
+```
+
+## Next Steps
+
+- Configure Proton settings in [Configuration](/operations/configuration)
+- Set up monitoring with [Monitoring](/operations/monitoring)
+- Optimize performance with [Performance Tuning](/operations/performance-tuning)

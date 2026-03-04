@@ -1,0 +1,499 @@
+---
+title: Configuration
+description: Configure Timeplus Proton server settings and options
+---
+
+Timeplus Proton uses YAML or XML configuration files to control server behavior, network settings, storage, and resource limits.
+
+## Configuration Files
+
+### Main Configuration File
+
+By default, Proton looks for configuration in:
+
+- **Docker**: `/etc/proton-server/config.yaml`
+- **Binary**: `./proton-data/config.yaml` or specified with `--config-file`
+
+Specify a custom config file:
+
+```bash
+proton server --config-file /path/to/config.yaml
+```
+
+### Configuration Directory Structure
+
+```
+/etc/proton-server/
+├── config.yaml              # Main server configuration
+├── users.yaml               # User settings and profiles
+├── config.d/                # Additional config overrides
+│   ├── logging.xml
+│   ├── custom.yaml
+│   └── ...
+└── users.d/                 # User config overrides
+    └── ...
+```
+
+### Configuration Format
+
+Proton supports both YAML and XML formats. YAML is recommended for readability:
+
+```yaml
+# config.yaml
+logger:
+  level: information
+  log: /var/log/proton-server/proton-server.log
+
+http_port: 8123
+tcp_port: 8463
+```
+
+Equivalent XML:
+
+```xml
+<!-- config.xml -->
+<proton>
+  <logger>
+    <level>information</level>
+    <log>/var/log/proton-server/proton-server.log</log>
+  </logger>
+  <http_port>8123</http_port>
+  <tcp_port>8463</tcp_port>
+</proton>
+```
+
+## Network Settings
+
+### Port Configuration
+
+Configure network ports for different protocols:
+
+```yaml
+# HTTP API port (REST, JDBC, web UI)
+http_port: 8123
+
+# Native TCP protocol port
+tcp_port: 8463
+
+# PostgreSQL protocol compatibility
+postgresql_port: 5432
+
+# MySQL protocol compatibility
+mysql_port: 9004
+
+# HTTPS (requires TLS configuration)
+# https_port: 8443
+
+# Secure TCP (requires TLS configuration)
+# tcp_port_secure: 9440
+```
+
+### Listen Host
+
+Control which interfaces Proton binds to:
+
+```yaml
+# Listen on all interfaces (Docker default)
+node:
+  listen_host: 0.0.0.0
+
+# Listen only on localhost (secure default)
+# listen_host: 127.0.0.1
+
+# Listen on IPv6
+# listen_host: '::'
+```
+
+### Connection Limits
+
+```yaml
+# Maximum simultaneous connections
+max_connections: 4096
+
+# Keep-alive timeout for HTTP
+keep_alive_timeout: 3
+```
+
+## Storage Configuration
+
+### Data Paths
+
+Configure where Proton stores data:
+
+```yaml
+# Main data directory
+path: /var/lib/proton/
+
+# Temporary data for query processing
+tmp_path: /var/lib/proton/tmp/
+
+# User-uploaded files accessible via file() function
+user_files_path: /var/lib/proton/user_files/
+
+# Custom disk configurations
+custom_local_disks_base_directory: /var/lib/proton/disks/
+
+# Schema files for input formats
+format_schema_path: /var/lib/proton/format_schemas/
+
+# Query state spillover
+query_state_spill_path: /var/lib/proton/query_states_spilled
+```
+
+### Stream Storage Configuration
+
+Configure internal streaming storage:
+
+#### Native Log (Default)
+
+```yaml
+stream_storage:
+  nativelog:
+    enabled: true
+    # Data directory for native log
+    data_dir: /var/lib/proton/nativelog
+```
+
+#### Kafka/Redpanda Integration
+
+```yaml
+stream_storage:
+  kafka:
+    enabled: true
+    brokers: kafka:9092
+    cluster_id: proton-cluster
+    security_protocol: PLAINTEXT
+    # Optional authentication
+    # username: user
+    # password: pass
+    # ssl_ca_cert_file: /path/to/ca.crt
+    
+    # Producer settings
+    queue_buffering_max_ms: 50  # Latency control
+    
+    # Consumer settings
+    fetch_wait_max_ms: 500      # Polling wait time
+    
+    # Replication
+    logstore_replication_factor: 1
+```
+
+### Checkpoint Configuration
+
+Query state checkpointing for fault tolerance:
+
+```yaml
+query_state_checkpoint:
+  # Checkpoint directory
+  path: /var/lib/proton/checkpoint/
+  
+  # Checkpoint interval (0 = auto)
+  interval: 0
+  
+  # Auto interval settings
+  min_interval: 60              # Minimum interval (seconds)
+  light_state_interval: 5       # For lightweight ETL
+  heavy_state_interval: 900     # For large state (15 min)
+  heavy_state_size_threshold: 524288000  # 500 MB
+  
+  # Retention
+  last_access_ttl: 604800       # 7 days
+  last_access_check_interval: 7200
+  delete_grace_interval: 60
+  
+  # Log settings
+  log_segment_size: 1073741824  # 1 GB
+  log_max_entry_size: 10485760  # 10 MB
+  log_retention_ms: 7200000     # 2 hours
+```
+
+## Resource Limits
+
+### Memory Settings
+
+```yaml
+# Memory usage limits
+max_server_memory_usage_to_ram_ratio: 0.9  # Use up to 90% of RAM
+
+# Cache limits
+cache_size_to_ram_max_ratio: 0.5           # Cache up to 50% of RAM
+
+# Mark cache configuration
+mark_cache_size: 5368709120                # 5 GB
+
+# Uncompressed cache
+uncompressed_cache_size: 8589934592        # 8 GB
+```
+
+### Query Concurrency
+
+```yaml
+# Overall query limits
+max_concurrent_queries: 100
+max_concurrent_select_queries: 100
+max_concurrent_insert_queries: 100
+
+# Streaming query pool
+streaming_processing_pool_size: 100
+```
+
+### Thread Pools
+
+```yaml
+# Background processing threads
+background_pool_size: 16
+background_merge_pool_size: 16
+background_fetches_pool_size: 8
+background_move_pool_size: 8
+background_schedule_pool_size: 128
+```
+
+## Logging Configuration
+
+### Log Levels and Output
+
+```yaml
+logger:
+  # Log levels: none, fatal, critical, error, warning,
+  #             notice, information, debug, trace
+  level: information
+  
+  # Log file paths
+  log: /var/log/proton-server/proton-server.log
+  errorlog: /var/log/proton-server/proton-server.err.log
+  
+  # Rotation policy
+  size: 1000M    # Rotate when file reaches 1 GB
+  count: 10      # Keep 10 old log files
+  
+  # Console logging (auto-detected for Docker)
+  # console: 1
+```
+
+### Per-Component Log Levels
+
+```yaml
+logger:
+  level: information
+  
+  # Suppress specific loggers
+  levels:
+    - logger:
+        name: 'ConfigReloader'
+        level: none
+    - logger:
+        name: 'ContextAccess (default)'
+        level: warning
+```
+
+### Query Logging
+
+```yaml
+# Log all queries to system.query_log
+query_log:
+  database: system
+  table: query_log
+  
+  # Flush interval
+  flush_interval_milliseconds: 7500
+  
+  # Partition by day
+  partition_by: toYYYYMMDD(event_date)
+```
+
+## Node Roles
+
+Configure which roles the node should perform:
+
+```yaml
+node:
+  # Supported roles: Metadata, Data, Compute
+  # Data role includes Compute by default
+  roles:
+    role:
+      - Metadata
+      - Data
+  
+  # Network settings for this node
+  http:
+    port: 3218
+    is_tls_port: false
+  
+  tcp:
+    port: 8463
+    is_tls_port: false
+```
+
+## TLS/SSL Configuration
+
+### Enable HTTPS and Secure TCP
+
+```yaml
+# Enable secure ports
+https_port: 8443
+tcp_port_secure: 9440
+
+openSSL:
+  server:
+    # Certificate files
+    certificateFile: /etc/proton-server/certs/server.crt
+    privateKeyFile: /etc/proton-server/certs/server.key
+    caConfig: /etc/proton-server/certs/ca.crt
+    
+    # Verification mode
+    verificationMode: relaxed
+    
+    # Cipher configuration
+    cipherList: 'HIGH:!aNULL:!MD5'
+    preferServerCiphers: true
+    
+    # Disable insecure protocols
+    disableProtocols: 'sslv2,sslv3'
+```
+
+## User Configuration
+
+User settings are stored in `users.yaml`:
+
+```yaml
+users:
+  # Default user (no password by default)
+  default:
+    password: ''
+    
+    # Networks allowed to connect
+    networks:
+      ip:
+        - '::/0'  # Allow from anywhere
+    
+    # User profile and quota
+    profile: default
+    quota: default
+    
+    # Access management
+    access_management: 1
+  
+  # Example user with password
+  admin:
+    password_sha256_hex: 'SHA256_HASH_HERE'
+    networks:
+      ip:
+        - '127.0.0.1'
+        - '::1'
+    profile: default
+```
+
+### User Profiles
+
+```yaml
+profiles:
+  default:
+    # Query limits
+    max_memory_usage: 10000000000  # 10 GB
+    max_execution_time: 300         # 5 minutes
+    max_rows_to_read: 1000000000000
+    
+    # Result limits
+    max_result_rows: 1000000
+    max_result_bytes: 10000000000
+    
+    # Streaming settings
+    stream_poll_timeout_ms: 500
+```
+
+## Environment Variables
+
+Override configuration with environment variables (Docker):
+
+```bash
+docker run -d \
+  -e STREAM_STORAGE_BROKERS=kafka:9092 \
+  -e STREAM_STORAGE_TYPE=kafka \
+  -e MAX_CONCURRENT_QUERIES=200 \
+  -e MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO=0.8 \
+  d.timeplus.com/timeplus-io/proton:latest
+```
+
+Supported environment variables:
+
+| Variable | Description |
+|----------|-------------|
+| `PROTON_CONFIG` | Path to config file |
+| `STREAM_STORAGE_BROKERS` | Kafka broker addresses |
+| `STREAM_STORAGE_TYPE` | `kafka` or `nativelog` |
+| `MAX_CONCURRENT_QUERIES` | Query concurrency limit |
+| `MAX_SERVER_MEMORY_USAGE_TO_RAM_RATIO` | Memory limit (0-1) |
+| `MAX_SERVER_MEMORY_CACHE_TO_RAM_RATIO` | Cache size (0-1) |
+
+## Configuration Validation
+
+### Check Configuration
+
+Validate your config before starting:
+
+```bash
+proton server --config-file config.yaml --validate
+```
+
+### Skip Validation
+
+To skip validation of user-level settings in server config:
+
+```yaml
+skip_check_for_incorrect_settings: 1
+```
+
+## Configuration Best Practices
+
+1. **Use YAML format** for better readability and maintainability
+2. **Store secrets securely** - don't commit passwords to version control
+3. **Set appropriate memory limits** based on available RAM
+4. **Enable TLS** for production deployments
+5. **Configure log rotation** to prevent disk space issues
+6. **Use config.d/** for modular configuration
+7. **Document custom settings** in comments
+8. **Test configuration changes** in non-production first
+
+## Example Complete Configuration
+
+```yaml
+# Display name in client
+display_name: proton-production
+
+# Network
+http_port: 8123
+tcp_port: 8463
+max_connections: 4096
+
+# Storage
+path: /var/lib/proton/
+tmp_path: /var/lib/proton/tmp/
+
+# Logging
+logger:
+  level: information
+  log: /var/log/proton-server/proton-server.log
+  size: 1000M
+  count: 10
+
+# Resources
+max_server_memory_usage_to_ram_ratio: 0.9
+max_concurrent_queries: 100
+
+# Stream storage
+stream_storage:
+  kafka:
+    enabled: true
+    brokers: kafka-1:9092,kafka-2:9092,kafka-3:9092
+    cluster_id: production-cluster
+    security_protocol: SASL_SSL
+    username: proton
+    password: ${KAFKA_PASSWORD}
+    logstore_replication_factor: 3
+```
+
+## Next Steps
+
+- Monitor your deployment with [Monitoring](/operations/monitoring)
+- Optimize settings with [Performance Tuning](/operations/performance-tuning)
+- Review [Deployment](/operations/deployment) options

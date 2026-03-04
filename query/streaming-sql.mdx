@@ -1,0 +1,190 @@
+---
+title: Streaming SQL Overview
+description: Understanding streaming queries in Timeplus Proton
+---
+
+Timeplus Proton extends SQL to support both streaming and batch query modes, enabling real-time data processing alongside historical analysis.
+
+## Query Modes
+
+Proton supports two fundamental query modes:
+
+### Streaming Queries
+
+Streaming queries continuously process data as it arrives, producing incremental results:
+
+```sql
+-- Continuous aggregation on incoming data
+SELECT device_id, avg(temperature) 
+FROM sensor_readings 
+GROUP BY device_id;
+```
+
+Streaming queries:
+- Process events as they arrive in real-time
+- Emit results continuously or at specified intervals
+- Run indefinitely until explicitly cancelled
+- Enable stateful computations like windowed aggregations
+
+### Historical Queries
+
+Historical queries process data already stored in streams, similar to traditional database queries:
+
+```sql
+-- Query historical data using table() function
+SELECT device_id, avg(temperature)
+FROM table(sensor_readings)
+WHERE _tp_time > now() - INTERVAL 1 HOUR
+GROUP BY device_id;
+```
+
+<Note>
+The `table()` function switches query semantics from streaming to batch mode, treating the stream as a bounded dataset.
+</Note>
+
+## Stream vs Table Semantics
+
+### Default Streaming Mode
+
+By default, querying a stream directly processes data in streaming mode:
+
+```sql
+-- This is a streaming query
+SELECT * FROM orders;
+```
+
+The query:
+- Starts from the latest data
+- Continues running indefinitely
+- Emits results as new events arrive
+
+### Table Function for Historical Data
+
+Wrap a stream with `table()` to query it as bounded historical data:
+
+```sql
+-- Query all historical data
+SELECT * FROM table(orders) ORDER BY order_time;
+
+-- Query specific time range
+SELECT * FROM table(orders)
+WHERE _tp_time >= '2024-01-01'
+  AND _tp_time < '2024-02-01';
+```
+
+## Controlling Query Behavior
+
+### EMIT STREAM for Continuous Output
+
+Use `EMIT STREAM` to control when aggregation results are emitted:
+
+```sql
+-- Emit results periodically every 5 seconds
+SELECT window_start, count(*) as event_count
+FROM tumble(events, _tp_time, INTERVAL 5 SECOND)
+GROUP BY window_start, window_end
+EMIT STREAM PERIODIC INTERVAL 5 SECOND;
+```
+
+### Settings for Query Control
+
+Control query starting position with settings:
+
+```sql
+-- Start from earliest available data
+SELECT * FROM orders 
+SETTINGS seek_to = 'earliest';
+
+-- Start from latest (default)
+SELECT * FROM orders 
+SETTINGS seek_to = 'latest';
+```
+
+## Streaming vs Batch Query Comparison
+
+| Feature | Streaming Query | Historical Query |
+|---------|----------------|------------------|
+| **Syntax** | `SELECT ... FROM stream` | `SELECT ... FROM table(stream)` |
+| **Data Scope** | Unbounded, ongoing | Bounded, finite |
+| **Execution** | Continuous | One-time |
+| **Results** | Incremental updates | Complete result set |
+| **Latency** | Real-time | Depends on data size |
+| **Use Case** | Monitoring, alerting | Analysis, reporting |
+
+## Event Time Column
+
+Every stream has a reserved `_tp_time` column that tracks event ingestion time:
+
+```sql
+-- Filter by event time
+SELECT * FROM events 
+WHERE _tp_time > now() - INTERVAL 10 MINUTE;
+
+-- Use custom timestamp column for windowing
+SELECT window_start, count(*)
+FROM tumble(events, event_timestamp, INTERVAL 1 MINUTE)
+GROUP BY window_start, window_end;
+```
+
+<Tip>
+While `_tp_time` represents ingestion time, you can use any datetime column for time-based operations like windowing.
+</Tip>
+
+## Query Examples
+
+### Real-time Filtering
+
+```sql
+-- Monitor high-value transactions
+SELECT transaction_id, amount, user_id
+FROM transactions
+WHERE amount > 10000;
+```
+
+### Historical Analysis
+
+```sql
+-- Analyze yesterday's transaction patterns
+SELECT hour(transaction_time) as hour, 
+       count() as tx_count,
+       avg(amount) as avg_amount
+FROM table(transactions)
+WHERE to_date(transaction_time) = today() - 1
+GROUP BY hour
+ORDER BY hour;
+```
+
+### Mixed Mode with Subqueries
+
+```sql
+-- Stream query with historical reference data
+SELECT 
+  live.device_id,
+  live.temperature,
+  hist.avg_temp
+FROM sensor_readings AS live
+LEFT JOIN (
+  SELECT device_id, avg(temperature) as avg_temp
+  FROM table(sensor_readings)
+  WHERE _tp_time > now() - INTERVAL 24 HOUR
+  GROUP BY device_id
+) AS hist ON live.device_id = hist.device_id
+WHERE live.temperature > hist.avg_temp * 1.5;
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Creating Streams" icon="plus" href="/query/creating-streams">
+    Learn how to define and create streams
+  </Card>
+  <Card title="Time Windows" icon="clock" href="/query/time-windows">
+    Explore windowed aggregations
+  </Card>
+  <Card title="Joins" icon="link" href="/query/joins">
+    Understand stream-to-stream joins
+  </Card>
+  <Card title="Aggregations" icon="chart-bar" href="/query/aggregations">
+    Master streaming aggregations
+  </Card>
+</CardGroup>

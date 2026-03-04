@@ -1,0 +1,489 @@
+---
+title: Client Libraries
+description: Connect to Timeplus Proton using JDBC, Python, Go, and other client libraries
+---
+
+Timeplus Proton provides official client libraries for Java, Python, and Go, enabling seamless integration with your applications.
+
+## JDBC Driver
+
+The Proton JDBC driver enables Java applications to connect to Timeplus Proton using standard JDBC APIs.
+
+### Installation
+
+#### Maven
+
+```xml
+<dependency>
+  <groupId>com.timeplus</groupId>
+  <artifactId>proton-jdbc</artifactId>
+  <version>0.6.0</version>
+</dependency>
+```
+
+#### Gradle
+
+```groovy
+implementation 'com.timeplus:proton-jdbc:0.6.0'
+```
+
+#### Direct Download
+
+Download the latest JAR from [GitHub Releases](https://github.com/timeplus-io/proton-java-driver/releases).
+
+### Connection
+
+#### JDBC URL Format
+
+```
+jdbc:proton://host:port/database
+```
+
+#### Default Values
+
+- **Host**: `localhost`
+- **Port**: `8123` (HTTP) or `3218` (native)
+- **Database**: `default`
+- **Username**: `default`
+- **Password**: (empty)
+
+### Basic Example
+
+```java
+import java.sql.*;
+
+public class ProtonExample {
+    public static void main(String[] args) throws SQLException {
+        String url = "jdbc:proton://localhost:8123/default";
+        String user = "default";
+        String password = "";
+        
+        try (Connection conn = DriverManager.getConnection(url, user, password);
+             Statement stmt = conn.createStatement();
+             ResultSet rs = stmt.executeQuery("SELECT version()")) {
+            
+            while (rs.next()) {
+                System.out.println("Proton version: " + rs.getString(1));
+            }
+        }
+    }
+}
+```
+
+### Query Examples
+
+#### Historical Query
+
+```java
+String sql = "SELECT * FROM table(car_live_data) LIMIT 10";
+try (Statement stmt = conn.createStatement();
+     ResultSet rs = stmt.executeQuery(sql)) {
+    
+    while (rs.next()) {
+        String device = rs.getString("device");
+        double speed = rs.getDouble("speed");
+        System.out.println(device + ": " + speed);
+    }
+}
+```
+
+#### Streaming Query with LIMIT
+
+```java
+// Stream until 100 events are received
+String sql = "SELECT * FROM events LIMIT 100";
+try (Statement stmt = conn.createStatement();
+     ResultSet rs = stmt.executeQuery(sql)) {
+    
+    while (rs.next()) {
+        System.out.println(rs.getString("event_type"));
+    }
+}
+```
+
+#### Prepared Statements
+
+```java
+String sql = "SELECT * FROM events WHERE device = ? LIMIT ?";
+try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+    pstmt.setString(1, "sensor1");
+    pstmt.setInt(2, 100);
+    
+    try (ResultSet rs = pstmt.executeQuery()) {
+        while (rs.next()) {
+            System.out.println(rs.getTimestamp("timestamp"));
+        }
+    }
+}
+```
+
+### Insert Data
+
+```java
+String sql = "INSERT INTO events (device, temperature, timestamp) VALUES (?, ?, ?)";
+try (PreparedStatement pstmt = conn.prepareStatement(sql)) {
+    pstmt.setString(1, "sensor1");
+    pstmt.setDouble(2, 25.5);
+    pstmt.setTimestamp(3, new Timestamp(System.currentTimeMillis()));
+    pstmt.executeUpdate();
+}
+```
+
+### Port Selection
+
+#### Port 8123 (Batch Mode)
+
+```java
+String url = "jdbc:proton://localhost:8123";
+// Queries run in batch mode by default
+// SELECT returns all existing data
+```
+
+#### Port 3218 (Streaming Mode)
+
+```java
+String url = "jdbc:proton://localhost:3218";
+// Queries run in streaming mode by default
+// Use LIMIT to terminate queries
+// Or use table() function for historical queries
+```
+
+### DBeaver Configuration
+
+1. Open **Database** → **Driver Manager** → **New**
+2. Configure:
+   - **Driver Name**: Timeplus Proton
+   - **Class Name**: `com.timeplus.proton.jdbc.ProtonDriver`
+   - **URL Template**: `jdbc:proton://{host}:{port}/{database}`
+   - **Default Port**: `8123`
+   - **Default Database**: `default`
+3. In **Libraries** tab: Add Artifact `com.timeplus:proton-jdbc:0.6.0`
+4. Click **Find Class** to load driver
+5. Create connection with `localhost:8123`
+
+### Resources
+
+- [GitHub Repository](https://github.com/timeplus-io/proton-java-driver)
+- [Testcontainers Tutorial](https://docs.timeplus.com/tutorial-testcontainers-java)
+
+## Python Driver
+
+The Proton Python driver provides a native Python interface for Timeplus Proton.
+
+### Installation
+
+```bash
+pip install proton-driver
+```
+
+### Connection
+
+```python
+from proton_driver import client
+
+# Connect to Proton
+conn = client.connect(
+    host='localhost',
+    port=8123,
+    user='default',
+    password=''
+)
+```
+
+### Query Examples
+
+#### Simple Query
+
+```python
+# Execute query
+result = conn.query("SELECT version()")
+
+# Get results
+for row in result.result_rows:
+    print(row)
+```
+
+#### Query with Parameters
+
+```python
+result = conn.query(
+    "SELECT * FROM events WHERE device = %(device)s LIMIT %(limit)s",
+    params={'device': 'sensor1', 'limit': 10}
+)
+
+for row in result.result_rows:
+    print(row)
+```
+
+#### Stream Processing
+
+```python
+# Stream query results
+result = conn.query("SELECT * FROM my_stream LIMIT 100")
+
+for row in result.result_rows:
+    device = row[0]
+    temperature = row[1]
+    print(f"{device}: {temperature}°C")
+```
+
+### Insert Data
+
+```python
+# Single insert
+conn.command(
+    "INSERT INTO events (device, temperature) VALUES (%(device)s, %(temp)s)",
+    params={'device': 'sensor1', 'temp': 25.5}
+)
+
+# Bulk insert
+data = [
+    {'device': 'sensor1', 'temp': 25.5},
+    {'device': 'sensor2', 'temp': 26.3},
+    {'device': 'sensor3', 'temp': 24.8}
+]
+
+for row in data:
+    conn.command(
+        "INSERT INTO events (device, temperature) VALUES (%(device)s, %(temp)s)",
+        params=row
+    )
+```
+
+### Pandas Integration
+
+```python
+import pandas as pd
+
+# Query to DataFrame
+result = conn.query("SELECT * FROM table(events) LIMIT 1000")
+df = pd.DataFrame(result.result_rows, columns=result.column_names)
+
+print(df.head())
+```
+
+### Resources
+
+- [GitHub Repository](https://github.com/timeplus-io/proton-python-driver)
+- [Bytewax Integration Example](https://github.com/timeplus-io/proton-python-driver/tree/develop/example/bytewax)
+
+## Go Driver
+
+The Proton Go driver provides a native Go interface for Timeplus Proton.
+
+### Installation
+
+```bash
+go get github.com/timeplus-io/proton-go-driver/v2
+```
+
+### Connection
+
+```go
+import (
+    "context"
+    "fmt"
+    "github.com/timeplus-io/proton-go-driver/v2"
+)
+
+func main() {
+    conn, err := proton.Open(&proton.Options{
+        Addr: []string{"localhost:9000"},
+        Auth: proton.Auth{
+            Database: "default",
+            Username: "default",
+            Password: "",
+        },
+    })
+    if err != nil {
+        panic(err)
+    }
+    defer conn.Close()
+    
+    // Test connection
+    if err := conn.Ping(context.Background()); err != nil {
+        panic(err)
+    }
+}
+```
+
+### Query Examples
+
+#### Simple Query
+
+```go
+ctx := context.Background()
+rows, err := conn.Query(ctx, "SELECT version()")
+if err != nil {
+    panic(err)
+}
+defer rows.Close()
+
+for rows.Next() {
+    var version string
+    if err := rows.Scan(&version); err != nil {
+        panic(err)
+    }
+    fmt.Println("Proton version:", version)
+}
+```
+
+#### Scan into Struct
+
+```go
+type Event struct {
+    Device      string    `proton:"device"`
+    Temperature float64   `proton:"temperature"`
+    Timestamp   time.Time `proton:"timestamp"`
+}
+
+rows, err := conn.Query(ctx, "SELECT * FROM table(events) LIMIT 10")
+if err != nil {
+    panic(err)
+}
+defer rows.Close()
+
+for rows.Next() {
+    var event Event
+    if err := rows.ScanStruct(&event); err != nil {
+        panic(err)
+    }
+    fmt.Printf("%s: %.1f°C\n", event.Device, event.Temperature)
+}
+```
+
+### Insert Data
+
+```go
+batch, err := conn.PrepareBatch(ctx, "INSERT INTO events (device, temperature, timestamp)")
+if err != nil {
+    panic(err)
+}
+
+for i := 0; i < 100; i++ {
+    err := batch.Append("sensor1", 25.5, time.Now())
+    if err != nil {
+        panic(err)
+    }
+}
+
+if err := batch.Send(); err != nil {
+    panic(err)
+}
+```
+
+### Resources
+
+- [GitHub Repository](https://github.com/timeplus-io/proton-go-driver)
+
+## REST API Client
+
+For languages without native drivers, use the REST API over HTTP.
+
+### Example: cURL
+
+```bash
+# Query
+curl -X POST http://localhost:8123/ \
+  -d "SELECT * FROM table(events) LIMIT 5 FORMAT JSONEachRow"
+
+# Insert
+curl -X POST http://localhost:8123/ \
+  -d "INSERT INTO events (device, temp) VALUES ('sensor1', 25.5)"
+```
+
+### Example: Python requests
+
+```python
+import requests
+
+response = requests.post(
+    'http://localhost:8123/',
+    data='SELECT * FROM table(events) LIMIT 5 FORMAT JSON'
+)
+data = response.json()
+print(data)
+```
+
+See [REST API documentation](/integration/rest-api) for more details.
+
+## Comparison
+
+| Feature | JDBC | Python | Go | REST API |
+|---------|------|--------|----|-----------|
+| **Installation** | Maven/Gradle | pip | go get | N/A |
+| **Protocol** | Native/HTTP | Native/HTTP | Native | HTTP |
+| **Streaming** | ✓ | ✓ | ✓ | ✓ |
+| **Prepared Statements** | ✓ | ✓ | ✓ | ✗ |
+| **Connection Pooling** | ✓ | ✓ | ✓ | Manual |
+| **Type Safety** | ✓ | Partial | ✓ | ✗ |
+
+## Best Practices
+
+### Port Selection
+
+- **Port 8123** (HTTP): Use for batch queries, returns all existing data
+- **Port 3218** (Native): Use for streaming queries, requires LIMIT or table()
+
+### Query Modes
+
+#### Batch Mode (Port 8123)
+
+```java
+// Returns all existing data immediately
+SELECT * FROM my_stream
+```
+
+#### Streaming Mode (Port 3218)
+
+```java
+// Streams continuously, use LIMIT to terminate
+SELECT * FROM my_stream LIMIT 100
+
+// Or use table() function for historical data
+SELECT * FROM table(my_stream)
+```
+
+### Connection Management
+
+1. **Use connection pooling**: Don't create new connections for each query
+2. **Close resources**: Always close ResultSet, Statement, Connection
+3. **Handle timeouts**: Set appropriate query timeouts
+4. **Retry logic**: Implement retry for transient failures
+
+### Error Handling
+
+```java
+try (Connection conn = DriverManager.getConnection(url, user, password)) {
+    // Your code
+} catch (SQLException e) {
+    System.err.println("Error: " + e.getMessage());
+    // Handle error
+}
+```
+
+## Additional Integrations
+
+### Grafana
+
+Visualize Proton data with the Grafana data source plugin:
+
+- [Proton Grafana Source](https://github.com/timeplus-io/proton-grafana-source)
+
+### dbt
+
+Manage Proton transformations with dbt:
+
+- [dbt-proton](https://github.com/timeplus-io/dbt-proton)
+
+### Sling
+
+Data integration tool supporting Proton:
+
+- [Sling Documentation](https://docs.timeplus.com/sling)
+
+## Related Resources
+
+- [Kafka Integration](/integration/kafka)
+- [ClickHouse Integration](/integration/clickhouse)
+- [REST API](/integration/rest-api)

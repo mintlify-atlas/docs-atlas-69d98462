@@ -1,0 +1,516 @@
+---
+title: Monitoring
+description: Monitor Timeplus Proton performance and health
+---
+
+Timeplus Proton provides comprehensive monitoring capabilities through system tables, metrics, logs, and health check endpoints.
+
+## Health Checks
+
+### HTTP Ping Endpoint
+
+The simplest health check is the HTTP ping endpoint:
+
+```bash
+curl http://localhost:8123/ping
+# Response: Ok.
+```
+
+Use this for:
+- Load balancer health checks
+- Docker/Kubernetes liveness probes
+- Uptime monitoring
+
+### Docker Health Check
+
+Add to your Dockerfile or docker-compose.yml:
+
+```dockerfile
+HEALTHCHECK --interval=30s --timeout=3s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8123/ping || exit 1
+```
+
+Docker Compose example:
+
+```yaml
+services:
+  proton:
+    image: d.timeplus.com/timeplus-io/proton:latest
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8123/ping"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+```
+
+### Kubernetes Probes
+
+```yaml
+apiVersion: v1
+kind: Pod
+spec:
+  containers:
+  - name: proton
+    image: d.timeplus.com/timeplus-io/proton:latest
+    livenessProbe:
+      httpGet:
+        path: /ping
+        port: 8123
+      initialDelaySeconds: 30
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /ping
+        port: 8123
+      initialDelaySeconds: 10
+      periodSeconds: 5
+```
+
+### TCP Connection Test
+
+Test the native protocol port:
+
+```bash
+echo "SELECT 1" | proton client --host localhost --port 8463
+```
+
+## System Tables
+
+Proton exposes extensive runtime information through system tables in the `system` database.
+
+### Query Monitoring
+
+#### Current Queries
+
+View currently running queries:
+
+```sql
+SELECT 
+    query_id,
+    user,
+    query,
+    elapsed,
+    read_rows,
+    read_bytes,
+    memory_usage
+FROM system.processes
+ORDER BY elapsed DESC;
+```
+
+#### Query Log
+
+Analyze query performance history:
+
+```sql
+SELECT 
+    type,
+    query_start_time,
+    query_duration_ms,
+    query,
+    read_rows,
+    written_rows,
+    memory_usage,
+    exception
+FROM system.query_log
+WHERE event_date = today()
+ORDER BY query_start_time DESC
+LIMIT 100;
+```
+
+Find slow queries:
+
+```sql
+SELECT 
+    query,
+    query_duration_ms / 1000 AS duration_sec,
+    read_rows,
+    memory_usage / 1024 / 1024 AS memory_mb
+FROM system.query_log
+WHERE query_duration_ms > 10000  -- Slower than 10 seconds
+  AND type = 'QueryFinish'
+  AND event_date >= today() - 7
+ORDER BY query_duration_ms DESC
+LIMIT 20;
+```
+
+### Performance Metrics
+
+#### Current Metrics
+
+Real-time server metrics:
+
+```sql
+SELECT 
+    metric,
+    value,
+    description
+FROM system.metrics
+ORDER BY metric;
+```
+
+Key metrics to monitor:
+
+```sql
+SELECT metric, value 
+FROM system.metrics 
+WHERE metric IN (
+    'Query',                    -- Active queries
+    'Merge',                    -- Active merges
+    'MemoryTracking',          -- Current memory usage
+    'BackgroundPoolTask',      -- Background tasks
+    'TCPConnection',           -- TCP connections
+    'HTTPConnection'           -- HTTP connections
+);
+```
+
+#### Asynchronous Metrics
+
+Periodically updated metrics:
+
+```sql
+SELECT 
+    metric,
+    value
+FROM system.asynchronous_metrics
+WHERE metric IN (
+    'jemalloc.allocated',       -- Memory allocated
+    'jemalloc.resident',        -- Resident memory
+    'Uptime',                   -- Server uptime
+    'NumberOfDatabases',        -- Database count
+    'NumberOfTables'            -- Table count
+);
+```
+
+#### Event Counters
+
+Cumulative event statistics:
+
+```sql
+SELECT 
+    event,
+    value,
+    description
+FROM system.events
+WHERE event IN (
+    'Query',                    -- Total queries
+    'SelectQuery',              -- SELECT queries
+    'InsertQuery',              -- INSERT queries
+    'FailedQuery',              -- Failed queries
+    'QueryTimeMicroseconds'    -- Total query time
+)
+ORDER BY event;
+```
+
+### Resource Usage
+
+#### Memory Usage
+
+Current memory consumption:
+
+```sql
+SELECT 
+    formatReadableSize(value) AS memory
+FROM system.asynchronous_metrics
+WHERE metric = 'jemalloc.allocated';
+```
+
+Memory by query:
+
+```sql
+SELECT 
+    query_id,
+    user,
+    formatReadableSize(memory_usage) AS memory,
+    query
+FROM system.processes
+ORDER BY memory_usage DESC;
+```
+
+#### Disk Usage
+
+Table storage statistics:
+
+```sql
+SELECT 
+    database,
+    table,
+    formatReadableSize(sum(bytes)) AS size,
+    sum(rows) AS rows
+FROM system.parts
+WHERE active
+GROUP BY database, table
+ORDER BY sum(bytes) DESC;
+```
+
+### Stream and Table Information
+
+#### List All Streams
+
+```sql
+SELECT 
+    name,
+    type,
+    engine
+FROM system.tables
+WHERE database != 'system'
+ORDER BY name;
+```
+
+#### Stream Statistics
+
+```sql
+SELECT 
+    database,
+    table,
+    engine,
+    total_rows,
+    total_bytes
+FROM system.tables
+WHERE engine LIKE '%Stream%';
+```
+
+### Error Monitoring
+
+Track errors by type:
+
+```sql
+SELECT 
+    name,
+    value,
+    last_error_time,
+    last_error_message
+FROM system.errors
+ORDER BY value DESC
+LIMIT 20;
+```
+
+## Log Files
+
+### Log Locations
+
+Default log file paths:
+
+- **Server log**: `/var/log/proton-server/proton-server.log`
+- **Error log**: `/var/log/proton-server/proton-server.err.log`
+
+### Log Levels
+
+Configure in `config.yaml`:
+
+```yaml
+logger:
+  level: information  # none, fatal, critical, error, warning,
+                      # notice, information, debug, trace
+  log: /var/log/proton-server/proton-server.log
+  errorlog: /var/log/proton-server/proton-server.err.log
+```
+
+### View Logs in Docker
+
+```bash
+# Follow logs
+docker logs -f proton
+
+# Last 100 lines
+docker logs --tail 100 proton
+
+# With timestamps
+docker logs -t proton
+```
+
+### Parse Logs for Errors
+
+```bash
+# Find errors in log
+grep -i error /var/log/proton-server/proton-server.log
+
+# Count errors by type
+grep -i error /var/log/proton-server/proton-server.log | \
+  awk '{print $5}' | sort | uniq -c | sort -rn
+```
+
+## Performance Monitoring
+
+### Query Performance Dashboard
+
+Create a monitoring query:
+
+```sql
+SELECTWITH 
+    count(*) AS total_queries,
+    countIf(type = 'QueryFinish') AS successful,
+    countIf(type = 'ExceptionWhileProcessing') AS failed,
+    avg(query_duration_ms) AS avg_duration_ms,
+    quantile(0.95)(query_duration_ms) AS p95_duration_ms,
+    max(query_duration_ms) AS max_duration_ms
+FROM system.query_log
+WHERE event_date = today()
+  AND query_start_time >= now() - INTERVAL 1 HOUR;
+```
+
+### Throughput Monitoring
+
+```sql
+SELECT 
+    to_start_of_minute(query_start_time) AS minute,
+    count(*) AS queries_per_minute,
+    sum(read_rows) AS rows_read,
+    sum(written_rows) AS rows_written
+FROM system.query_log
+WHERE event_date = today()
+  AND query_start_time >= now() - INTERVAL 1 HOUR
+GROUP BY minute
+ORDER BY minute DESC;
+```
+
+### Resource Utilization Over Time
+
+```sql
+-- Track memory usage patterns
+SELECT 
+    to_start_of_hour(query_start_time) AS hour,
+    avg(memory_usage) / 1024 / 1024 / 1024 AS avg_memory_gb,
+    max(memory_usage) / 1024 / 1024 / 1024 AS max_memory_gb
+FROM system.query_log
+WHERE event_date >= today() - 7
+GROUP BY hour
+ORDER BY hour DESC;
+```
+
+## Grafana Integration
+
+Use the [Proton Grafana data source](https://github.com/timeplus-io/proton-grafana-source) to build dashboards.
+
+### Example Dashboard Queries
+
+**Active Queries**:
+```sql
+SELECT count(*) FROM system.processes
+```
+
+**Queries Per Second**:
+```sql
+SELECT 
+    to_start_of_interval(query_start_time, INTERVAL 10 SECOND) AS time,
+    count(*) / 10 AS qps
+FROM system.query_log
+WHERE query_start_time >= now() - INTERVAL 5 MINUTE
+GROUP BY time
+ORDER BY time
+```
+
+**Memory Usage**:
+```sql
+SELECT 
+    now() AS time,
+    value AS bytes
+FROM system.asynchronous_metrics
+WHERE metric = 'jemalloc.allocated'
+```
+
+## Alerting
+
+### Key Metrics to Alert On
+
+1. **Server Availability**: `/ping` endpoint down
+2. **High Error Rate**: Errors in `system.errors` increasing
+3. **Memory Usage**: `jemalloc.allocated` > 80% of RAM
+4. **Slow Queries**: p95 latency > threshold
+5. **Failed Queries**: High count in `system.query_log`
+6. **Disk Space**: Storage > 90% full
+
+### Example Alert Queries
+
+**High Error Rate**:
+```sql
+SELECT 
+    count(*) AS error_count
+FROM system.query_log
+WHERE type = 'ExceptionWhileProcessing'
+  AND query_start_time >= now() - INTERVAL 5 MINUTE;
+-- Alert if error_count > 10
+```
+
+**Memory Pressure**:
+```sql
+SELECT 
+    value / (SELECT value FROM system.asynchronous_metrics WHERE metric = 'OSMemoryTotal') AS memory_ratio
+FROM system.asynchronous_metrics
+WHERE metric = 'jemalloc.allocated';
+-- Alert if memory_ratio > 0.9
+```
+
+**Query Latency**:
+```sql
+SELECT 
+    quantile(0.95)(query_duration_ms) AS p95_latency_ms
+FROM system.query_log
+WHERE type = 'QueryFinish'
+  AND query_start_time >= now() - INTERVAL 5 MINUTE;
+-- Alert if p95_latency_ms > 5000
+```
+
+## Monitoring Best Practices
+
+1. **Set up automated health checks** for uptime monitoring
+2. **Monitor query performance** regularly via `system.query_log`
+3. **Track resource usage** (CPU, memory, disk) trends
+4. **Configure log rotation** to prevent disk space issues
+5. **Set up alerts** for critical metrics (errors, latency, memory)
+6. **Use Grafana dashboards** for visualization
+7. **Review slow queries** weekly and optimize
+8. **Monitor streaming query health** for long-running queries
+9. **Track checkpoint sizes** for stateful queries
+10. **Keep historical metrics** for capacity planning
+
+## Troubleshooting Common Issues
+
+### High Memory Usage
+
+```sql
+-- Find memory-intensive queries
+SELECT query_id, user, memory_usage, query
+FROM system.processes
+ORDER BY memory_usage DESC
+LIMIT 10;
+
+-- Check cache sizes
+SELECT metric, value 
+FROM system.asynchronous_metrics
+WHERE metric LIKE '%Cache%';
+```
+
+### Slow Queries
+
+```sql
+-- Identify slow query patterns
+SELECT 
+    substring(query, 1, 100) AS query_pattern,
+    count(*) AS occurrences,
+    avg(query_duration_ms) AS avg_ms
+FROM system.query_log
+WHERE query_duration_ms > 1000
+GROUP BY query_pattern
+ORDER BY avg_ms DESC;
+```
+
+### Connection Issues
+
+```sql
+-- Check connection counts
+SELECT metric, value
+FROM system.metrics
+WHERE metric LIKE '%Connection%';
+
+-- View active connections
+SELECT user, count(*) AS connections
+FROM system.processes
+GROUP BY user;
+```
+
+## Next Steps
+
+- Optimize performance with [Performance Tuning](/operations/performance-tuning)
+- Configure alerts and logging in [Configuration](/operations/configuration)
+- Review [Deployment](/operations/deployment) best practices

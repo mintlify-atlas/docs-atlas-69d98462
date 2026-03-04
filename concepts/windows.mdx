@@ -1,0 +1,648 @@
+---
+title: Windows
+description: Time-based aggregations with tumbling, hopping, and session windows in Timeplus Proton
+---
+
+# Windows
+
+Windows divide continuous streams into finite chunks for time-based aggregations. Instead of accumulating state forever, windowed queries aggregate data within bounded time intervals and emit results when windows close.
+
+## Why Windows?
+
+<Tabs>
+  <Tab title="Without Windows">
+    ```sql
+    -- Unbounded aggregation - state grows forever
+    SELECT 
+      device,
+      count() as total_events,
+      avg(temperature) as avg_temp
+    FROM sensors
+    GROUP BY device;
+    ```
+    
+    **Issues:**
+    - State size grows indefinitely
+    - Results always show cumulative totals
+    - No notion of "recent" vs "old" data
+  </Tab>
+
+  <Tab title="With Windows">
+    ```sql
+    -- Windowed aggregation - bounded state
+    SELECT 
+      window_start,
+      window_end,
+      device,
+      count() as events_in_window,
+      avg(temperature) as avg_temp
+    FROM tumble(sensors, 5m)
+    GROUP BY window_start, window_end, device;
+    ```
+    
+    **Benefits:**
+    - State cleared after each window
+    - Results show metrics per time period
+    - Predictable memory usage
+  </Tab>
+</Tabs>
+
+## Window Types
+
+Proton supports three window types from ClickHouse:
+
+<CardGroup cols={3}>
+  <Card title="Tumble" icon="table-cells">
+    Fixed, non-overlapping windows
+  </Card>
+  <Card title="Hop" icon="table-cells-large">
+    Fixed-size, overlapping windows
+  </Card>
+  <Card title="Session" icon="clock">
+    Dynamic windows based on activity gaps
+  </Card>
+</CardGroup>
+
+## Tumbling Windows
+
+Tumbling windows divide the timeline into **non-overlapping**, **fixed-size** intervals.
+
+### Syntax
+
+```sql
+tumble([time_column], interval [, timezone])
+```
+
+**Parameters:**
+- `time_column`: Timestamp column (defaults to `_tp_time` if omitted)
+- `interval`: Window size (e.g., `5s`, `1m`, `1h`, `1d`)
+- `timezone`: Optional timezone name (e.g., `'America/New_York'`)
+
+### Basic Example
+
+```sql
+-- Count events per 10-second window
+SELECT 
+  window_start,
+  window_end,
+  count() as event_count
+FROM tumble(events, 10s)
+GROUP BY window_start, window_end;
+```
+
+**Timeline visualization:**
+```
+Time:  0s    10s   20s   30s   40s   50s
+       |--w1--|--w2--|--w3--|--w4--|--w5--|
+Events:  3     7      2      5      4
+```
+
+Each event belongs to exactly one window.
+
+### Real-World Example
+
+From `examples/broken-stream-monitor/script/iot_with_timer.sql`:
+
+```sql
+CREATE RANDOM STREAM device (
+  sensor string DEFAULT ['A', 'B', 'C'][(rand() / 1000000000 % 3) + 1],
+  temperature float DEFAULT round(rand_normal(10, 0.5), 2)
+)
+SETTINGS eps = 1;
+
+CREATE STREAM device_reader (
+  label string,
+  sensor string,
+  temperature float32
+);
+
+-- Monitor stream health with 3-second windows
+SELECT
+  window_start,
+  group_uniq_array(label) as unique_labels
+FROM tumble(device_reader, 3s)
+GROUP BY window_start;
+
+-- Alert if device data missing in window
+SELECT
+  window_start,
+  group_uniq_array(label) as unique_labels
+FROM tumble(device_reader, 3s)
+GROUP BY window_start
+HAVING index_of(unique_labels, 'device') = 0;
+```
+
+### Timezone Support
+
+```sql
+-- UTC (default)
+SELECT 
+  window_start,
+  count() as events
+FROM tumble(logs, 1h)
+GROUP BY window_start;
+
+-- Eastern Time
+SELECT 
+  window_start,
+  count() as events  
+FROM tumble(logs, 1h, 'America/New_York')
+GROUP BY window_start;
+
+-- Tokyo Time
+SELECT 
+  window_start,
+  count() as events
+FROM tumble(logs, 1h, 'Asia/Tokyo')
+GROUP BY window_start;
+```
+
+## Hopping Windows
+
+Hopping windows have **fixed size** but **slide** by a smaller interval, creating overlapping windows.
+
+### Syntax
+
+```sql
+hop([time_column], hop_interval, window_interval [, timezone])
+```
+
+**Parameters:**
+- `time_column`: Timestamp column (defaults to `_tp_time`)
+- `hop_interval`: How often to create new windows (slide interval)
+- `window_interval`: Window size (must be >= hop_interval)
+- `timezone`: Optional timezone
+
+### Basic Example
+
+```sql
+-- 10-second windows, sliding every 5 seconds
+SELECT 
+  window_start,
+  window_end,
+  count() as event_count
+FROM hop(events, 5s, 10s)
+GROUP BY window_start, window_end;
+```
+
+**Timeline visualization:**
+```
+Time:     0s         5s        10s        15s        20s
+          |----w1----|----w2----|----w3----|----w4----|
+                |----w5----|----w6----|----w7----|
+Events:     3    |    2    |    4    |    1    |    5
+```
+
+Events between 5s-10s belong to both w1 and w5.
+
+### Sliding Average Example
+
+```sql
+-- 5-minute average, updated every minute
+SELECT 
+  window_start,
+  sensor_id,
+  avg(temperature) as avg_temp,
+  max(temperature) as max_temp,
+  min(temperature) as min_temp
+FROM hop(sensors, 1m, 5m)
+GROUP BY window_start, sensor_id;
+```
+
+**Use case:** Smooth out spikes while maintaining recent context.
+
+### Real-Time Dashboard Metrics
+
+```sql
+-- Update dashboard every 10 seconds with last 1 minute of data
+CREATE MATERIALIZED VIEW mv_dashboard_metrics INTO dashboard_data AS
+SELECT 
+  window_end as timestamp,
+  service,
+  count() as requests_per_min,
+  avg(latency_ms) as avg_latency,
+  quantile(0.95)(latency_ms) as p95_latency,
+  count_if(status >= 500) as errors
+FROM hop(access_logs, 10s, 1m)
+GROUP BY window_end, service;
+```
+
+## Session Windows
+
+Session windows group events separated by **inactivity gaps**. A new session starts after a timeout period with no events.
+
+<Note>
+Session windows are currently experimental and require `allow_experimental_window_functions = 1`.
+</Note>
+
+### Syntax
+
+```sql
+session([time_column], timeout_interval [, timezone])
+```
+
+**Parameters:**
+- `time_column`: Timestamp column
+- `timeout_interval`: Maximum gap between events in same session
+- `timezone`: Optional timezone
+
+### User Session Example
+
+```sql
+-- Group user clicks into sessions (30-minute timeout)
+SELECT 
+  window_start as session_start,
+  window_end as session_end,
+  user_id,
+  count() as clicks_in_session,
+  date_diff('second', window_start, window_end) as session_duration_sec
+FROM session(clickstream, 30m)
+GROUP BY window_start, window_end, user_id;
+```
+
+**Timeline visualization:**
+```
+User clicks:  ^   ^  ^         ^      (30min timeout)
+             t0  t1 t2       t30
+             |--Session 1--|  |--Session 2--...
+```
+
+If next click arrives >30 minutes after t2, a new session starts.
+
+### Device Connection Sessions
+
+```sql
+-- Track IoT device connection sessions
+SELECT 
+  window_start,
+  window_end,
+  device_id,
+  count() as heartbeats,
+  max(battery_level) as max_battery,
+  min(battery_level) as min_battery
+FROM session(device_heartbeats, 5m)  -- 5-minute inactivity = disconnected
+GROUP BY window_start, window_end, device_id;
+```
+
+## Window Functions
+
+Proton provides helper functions for extracting window bounds:
+
+### Tumble Functions
+
+```sql
+-- Get window start time
+tumble_start(time_column, interval [, timezone])
+
+-- Get window end time  
+tumble_end(time_column, interval [, timezone])
+
+-- Example
+SELECT 
+  tumble_start(_tp_time, 1h) as hour,
+  count() as events
+FROM logs
+GROUP BY hour;
+```
+
+### Hop Functions
+
+```sql
+-- Get window start time
+hop_start(time_column, hop_interval, window_interval [, timezone])
+
+-- Get window end time
+hop_end(time_column, hop_interval, window_interval [, timezone])
+
+-- Example  
+SELECT 
+  hop_start(_tp_time, 30s, 1m) as window_start,
+  hop_end(_tp_time, 30s, 1m) as window_end,
+  count() as events
+FROM logs
+GROUP BY window_start, window_end;
+```
+
+## Window with Event Time
+
+By default, windows use ingestion time (`_tp_time`). For out-of-order events, use **event time**.
+
+### Event Time Column
+
+```sql
+-- Create stream with event time column
+CREATE STREAM sensor_data (
+  device_id string,
+  temperature float,
+  event_time datetime64(3)  -- Event timestamp from device
+)
+SETTINGS event_time_column='event_time';
+
+-- Window by event time
+SELECT 
+  window_start,
+  window_end,
+  device_id,
+  avg(temperature) as avg_temp
+FROM tumble(sensor_data, event_time, 5m)
+GROUP BY window_start, window_end, device_id;
+```
+
+### Watermarks
+
+Watermarks handle late-arriving events:
+
+```sql
+-- Process events within 1-minute delay tolerance
+CREATE STREAM sensor_data (
+  device_id string,
+  temperature float,
+  event_time datetime64(3)
+)
+SETTINGS 
+  event_time_column='event_time',
+  watermark_interval='1m';  -- Emit window when watermark > window_end
+
+SELECT 
+  window_start,
+  device_id,
+  avg(temperature) as avg_temp
+FROM tumble(sensor_data, event_time, 5m)
+GROUP BY window_start, device_id;
+```
+
+**Watermark strategies:**
+- `STRICTLY_ASCENDING`: Watermark = max observed timestamp
+- `ASCENDING`: Watermark = max observed timestamp - 1
+- `BOUNDED`: Watermark = max observed timestamp - delay
+
+See ClickHouse [Window View](/concepts/architecture) documentation for details.
+
+## Window Aggregations
+
+### Common Patterns
+
+<Tabs>
+  <Tab title="Traffic Metrics">
+    ```sql
+    -- Per-minute traffic statistics
+    SELECT 
+      window_start,
+      url_path,
+      count() as requests,
+      count(DISTINCT ip_address) as unique_visitors,
+      avg(response_time_ms) as avg_response_time,
+      quantile(0.5)(response_time_ms) as median_response_time,
+      quantile(0.95)(response_time_ms) as p95_response_time,
+      sum(bytes_sent) as total_bytes
+    FROM tumble(access_logs, 1m)
+    GROUP BY window_start, url_path
+    ORDER BY requests DESC;
+    ```
+  </Tab>
+
+  <Tab title="Error Rates">
+    ```sql
+    -- 5-minute error rate by service
+    SELECT 
+      window_start,
+      service,
+      count() as total_requests,
+      count_if(status >= 500) as errors,
+      errors / total_requests * 100 as error_rate_pct
+    FROM tumble(logs, 5m)
+    GROUP BY window_start, service
+    HAVING error_rate_pct > 5;  -- Alert if >5% errors
+    ```
+  </Tab>
+
+  <Tab title="Moving Average">
+    ```sql
+    -- 10-minute moving average (1-minute slide)
+    SELECT 
+      window_end as timestamp,
+      sensor_id,
+      avg(value) as moving_avg,
+      stddev(value) as stddev
+    FROM hop(sensor_readings, 1m, 10m)
+    GROUP BY window_end, sensor_id;
+    ```
+  </Tab>
+
+  <Tab title="Peak Detection">
+    ```sql
+    -- Find 5-minute windows with abnormal load
+    WITH window_stats AS (
+      SELECT 
+        window_start,
+        count() as events,
+        avg(cpu_usage) as avg_cpu
+      FROM tumble(metrics, 5m)
+      GROUP BY window_start
+    )
+    SELECT *
+    FROM window_stats
+    WHERE 
+      events > (SELECT avg(events) * 2 FROM window_stats)  -- 2x average
+      OR avg_cpu > 80;  -- Or high CPU
+    ```
+  </Tab>
+</Tabs>
+
+### Top-K per Window
+
+```sql
+-- Top 10 products by sales per hour
+SELECT 
+  window_start,
+  product_id,
+  sum(quantity) as units_sold,
+  sum(amount) as revenue
+FROM tumble(orders, 1h)
+GROUP BY window_start, product_id
+ORDER BY window_start, revenue DESC
+LIMIT 10 BY window_start;  -- Top 10 per window
+```
+
+## Materialized Views with Windows
+
+### Continuous Aggregation
+
+```sql
+-- Create target stream
+CREATE STREAM hourly_metrics (
+  hour datetime64(3),
+  service string,
+  request_count uint64,
+  avg_latency float,
+  p95_latency float,
+  error_count uint64
+);
+
+-- Materialized view for real-time hourly aggregation
+CREATE MATERIALIZED VIEW mv_hourly_metrics INTO hourly_metrics AS
+SELECT 
+  window_start as hour,
+  service,
+  count() as request_count,
+  avg(latency_ms) as avg_latency,
+  quantile(0.95)(latency_ms) as p95_latency,
+  count_if(status >= 500) as error_count
+FROM tumble(access_logs, 1h)
+GROUP BY window_start, service;
+
+-- Query aggregated data
+SELECT * FROM hourly_metrics
+ORDER BY hour DESC
+LIMIT 24;  -- Last 24 hours
+```
+
+### Multi-Level Rollups
+
+```sql
+-- Minute-level rollup
+CREATE STREAM metrics_1m (
+  minute datetime64(3),
+  metric_name string,
+  value float
+);
+
+CREATE MATERIALIZED VIEW mv_1m INTO metrics_1m AS
+SELECT 
+  window_start as minute,
+  metric_name,
+  avg(value) as value
+FROM tumble(raw_metrics, 1m)
+GROUP BY window_start, metric_name;
+
+-- Hour-level rollup from minute data
+CREATE STREAM metrics_1h (
+  hour datetime64(3),
+  metric_name string,
+  avg_value float,
+  min_value float,
+  max_value float
+);
+
+CREATE MATERIALIZED VIEW mv_1h INTO metrics_1h AS
+SELECT 
+  window_start as hour,
+  metric_name,
+  avg(value) as avg_value,
+  min(value) as min_value,
+  max(value) as max_value
+FROM tumble(metrics_1m, minute, 1h)
+GROUP BY window_start, metric_name;
+```
+
+## Performance Optimization
+
+### Choose Appropriate Window Size
+
+<Steps>
+
+<Step title="Small windows (seconds)">
+- **Pros**: Low latency, fine-grained metrics
+- **Cons**: Higher CPU usage, more output
+- **Use case**: Real-time alerting, dashboards
+</Step>
+
+<Step title="Medium windows (minutes)">
+- **Pros**: Balanced latency and throughput
+- **Cons**: Moderate delay for results
+- **Use case**: Standard monitoring, ETL
+</Step>
+
+<Step title="Large windows (hours/days)">
+- **Pros**: High throughput, less output
+- **Cons**: Higher latency, delayed insights
+- **Use case**: Historical reporting, batch analytics
+</Step>
+
+</Steps>
+
+### Partition Windows
+
+```sql
+-- Partition windows by high-cardinality key
+SELECT 
+  window_start,
+  user_id,  -- Millions of users
+  count() as events
+FROM tumble(clickstream, 1h)
+GROUP BY window_start, user_id
+SETTINGS 
+  max_memory_usage='4GB',  -- Limit memory per query
+  group_by_overflow_mode='any';  -- Graceful degradation
+```
+
+### Emit Control
+
+```sql
+-- Control when window results emit
+SELECT 
+  window_start,
+  count() as events
+FROM tumble(logs, 1m)
+GROUP BY window_start
+EMIT 
+  AFTER WATERMARK,  -- Emit when window closes
+  ON UPDATE;  -- Or on every update (default)
+```
+
+## Common Pitfalls
+
+<Warning>
+**Forgetting window in GROUP BY**
+
+```sql
+-- Wrong: Missing window in GROUP BY
+SELECT count() FROM tumble(events, 1m);
+-- Error: window_start and window_end not in GROUP BY
+
+-- Correct
+SELECT 
+  window_start,
+  count()
+FROM tumble(events, 1m)
+GROUP BY window_start;
+```
+</Warning>
+
+<Warning>
+**Mixing window types**
+
+```sql
+-- Wrong: Can't mix tumble and hop
+SELECT 
+  tumble_start(_tp_time, 1m),
+  hop_start(_tp_time, 30s, 1m),  -- Different window types!
+  count()
+FROM events;
+
+-- Correct: Use one window type
+SELECT 
+  window_start,
+  window_end,
+  count()
+FROM tumble(events, 1m)
+GROUP BY window_start, window_end;
+```
+</Warning>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Materialized Views" icon="eye" href="/concepts/materialized-views">
+    Build continuous aggregation pipelines
+  </Card>
+  <Card title="Query Syntax" icon="code" href="/sql/functions/window">
+    Complete window function reference
+  </Card>
+  <Card title="Streams" icon="water" href="/concepts/streams">
+    Learn about stream fundamentals
+  </Card>
+  <Card title="Examples" icon="book" href="/query/time-windows">
+    Real-world windowing patterns
+  </Card>
+</CardGroup>
