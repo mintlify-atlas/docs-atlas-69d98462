@@ -1,0 +1,139 @@
+{
+  "projectType": "data-platform",
+  "projectName": "Timeplus Proton",
+  "projectDescription": "The fastest SQL pipeline engine in a single C++ binary for stream processing, analytics, observability and AI.",
+  "theme": "aspen",
+  "primaryColor": "#cecb95",
+  "lightColor": "#100e76",
+  "darkColor": "#5d5a76",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/architecture",
+              "concepts/streams",
+              "concepts/external-streams",
+              "concepts/materialized-views",
+              "concepts/windows"
+            ]
+          },
+          {
+            "group": "Query Guide",
+            "pages": [
+              "query/streaming-sql",
+              "query/creating-streams",
+              "query/reading-data",
+              "query/writing-data",
+              "query/joins",
+              "query/aggregations",
+              "query/time-windows"
+            ]
+          },
+          {
+            "group": "Integration",
+            "pages": [
+              "integration/kafka",
+              "integration/clickhouse",
+              "integration/rest-api",
+              "integration/client-libraries"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/deployment",
+              "operations/configuration",
+              "operations/monitoring",
+              "operations/performance-tuning"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "SQL Reference",
+        "groups": [
+          {
+            "group": "Statements",
+            "pages": [
+              "sql/create-stream",
+              "sql/create-external-stream",
+              "sql/create-materialized-view",
+              "sql/select",
+              "sql/insert"
+            ]
+          },
+          {
+            "group": "Functions",
+            "pages": [
+              "sql/functions/overview",
+              "sql/functions/aggregation",
+              "sql/functions/window",
+              "sql/functions/time"
+            ]
+          },
+          {
+            "group": "Data Types",
+            "pages": [
+              "sql/data-types"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Examples",
+        "groups": [
+          {
+            "group": "Use Cases",
+            "pages": [
+              "examples/real-time-etl",
+              "examples/telemetry-pipeline",
+              "examples/feature-pipeline",
+              "examples/change-data-capture"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Single binary SQL stream processing engine",
+    "Native Kafka and streaming platform integration",
+    "Streaming ETL with multi-stream JOINs",
+    "Tumble/hop/session windows with watermarks",
+    "Materialized views for real-time aggregation",
+    "ClickHouse-powered analytical queries",
+    "External streams for Kafka, Redpanda, Pulsar",
+    "External tables for ClickHouse, MySQL, PostgreSQL",
+    "Python and JavaScript UDF support",
+    "Sub-millisecond latency stream processing"
+  ],
+  "publicApiSurface": [
+    "CREATE STREAM - Define streaming data structures",
+    "CREATE EXTERNAL STREAM - Connect to Kafka/Pulsar",
+    "CREATE MATERIALIZED VIEW - Real-time aggregations",
+    "SELECT - Query streaming and historical data",
+    "INSERT - Ingest data into streams",
+    "tumble() - Tumbling window function",
+    "hop() - Hopping window function",
+    "session() - Session window function",
+    "CREATE EXTERNAL TABLE - Connect to ClickHouse/databases",
+    "CREATE RANDOM STREAM - Generate test data",
+    "REST API /v1/queries - Execute streaming queries",
+    "REST API /v1/ddl - DDL operations",
+    "JDBC Driver - Java database connectivity",
+    "Python SDK - proton-python-driver",
+    "Go SDK - proton-go-driver"
+  ]
+}
